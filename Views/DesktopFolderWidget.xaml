@@ -1,0 +1,115 @@
+<Window x:Class="EchoUI.Views.DesktopFolderWidget"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Desktop Folder" Width="320" Height="420"
+        WindowStyle="None" AllowsTransparency="True"
+        Background="Transparent" Topmost="True"
+        ShowInTaskbar="False" ResizeMode="NoResize"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown"
+        SourceInitialized="Window_SourceInitialized">
+    <Grid>
+        <Border x:Name="RootBorder" Background="#DD1E1E2E" CornerRadius="14" Margin="8"
+                BorderBrush="#FF3A86FF" BorderThickness="1.5">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.5" Color="Black"/>
+            </Border.Effect>
+            <Grid Margin="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <DockPanel Grid.Row="0" Margin="0,0,0,6">
+                    <TextBlock x:Name="TxtFolderName" Text="Desktop" FontSize="16"
+                               FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="✕" Click="BtnClose_Click"
+                                Background="Transparent" Foreground="#FFAAAAAA" BorderBrush="Transparent"
+                                FontSize="14" Padding="4,0" Cursor="Hand"/>
+                    </StackPanel>
+                </DockPanel>
+
+                <!-- Dock position selector -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Dock:" Foreground="#FFAAAAAA" VerticalAlignment="Center"
+                               FontSize="11" Margin="0,0,6,0"/>
+                    <Button x:Name="BtnDockLeft" Content="◀" Click="BtnDock_Click" Tag="Left"
+                            Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                            Background="#FF2A2A3E" Foreground="#FFAAAAAA" BorderBrush="#FF555577"
+                            ToolTip="Dock Left"/>
+                    <Button x:Name="BtnDockTop" Content="▲" Click="BtnDock_Click" Tag="Top"
+                            Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                            Background="#FF2A2A3E" Foreground="#FFAAAAAA" BorderBrush="#FF555577"
+                            ToolTip="Dock Top"/>
+                    <Button x:Name="BtnDockBottom" Content="▼" Click="BtnDock_Click" Tag="Bottom"
+                            Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                            Background="#FF2A2A3E" Foreground="#FFAAAAAA" BorderBrush="#FF555577"
+                            ToolTip="Dock Bottom"/>
+                    <Button x:Name="BtnDockRight" Content="▶" Click="BtnDock_Click" Tag="Right"
+                            Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                            Background="#FF2A2A3E" Foreground="#FFAAAAAA" BorderBrush="#FF555577"
+                            ToolTip="Dock Right"/>
+                    <Button x:Name="BtnUndock" Content="Undock" Click="BtnUndock_Click"
+                            Height="24" FontSize="11" Cursor="Hand" Padding="8,0"
+                            Background="#FF2A2A3E" Foreground="#FFAAAAAA" BorderBrush="#FF555577"
+                            ToolTip="Float freely" Margin="4,0,0,0"/>
+                </StackPanel>
+
+                <!-- Folder path selector -->
+                <DockPanel Grid.Row="2" Margin="0,0,0,8">
+                    <Button Content="Browse…" Click="BtnBrowse_Click" DockPanel.Dock="Right"
+                            Padding="10,4" Background="#FF3A86FF" Foreground="White"
+                            BorderBrush="Transparent" Margin="8,0,0,0"/>
+                    <TextBox x:Name="TxtPath" IsReadOnly="True" Background="#FF2A2A3E" Foreground="White"
+                             BorderBrush="#FF555577" Padding="4,4" FontSize="11"
+                             Text="" VerticalContentAlignment="Center"/>
+                </DockPanel>
+
+                <!-- File grid -->
+                <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="FileGrid">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel ItemWidth="80" ItemHeight="90"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Click="FileItem_Click" Tag="{Binding FullPath}"
+                                        MouseRightButtonUp="FileItem_RightClick"
+                                        Background="Transparent" BorderBrush="Transparent"
+                                        Cursor="Hand" Padding="2" Width="76" Height="86">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <TextBlock Text="{Binding Icon}" FontSize="28"
+                                                   HorizontalAlignment="Center" Foreground="#FFCCCCCC"/>
+                                        <TextBlock Text="{Binding DisplayName}" FontSize="10"
+                                                   Foreground="White" TextTrimming="CharacterEllipsis"
+                                                   TextAlignment="Center" MaxWidth="72"
+                                                   HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Resize grip — shown only when docked, placed on the inner edge -->
+        <Border x:Name="ResizeGrip" Visibility="Collapsed"
+                Background="Transparent" Width="6"
+                HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                Cursor="SizeWE"
+                MouseLeftButtonDown="ResizeGrip_MouseDown"
+                MouseMove="ResizeGrip_MouseMove"
+                MouseLeftButtonUp="ResizeGrip_MouseUp">
+            <Border Background="#40FFFFFF" Width="2" CornerRadius="1"
+                    VerticalAlignment="Center" Height="40"
+                    HorizontalAlignment="Center"/>
+        </Border>
+    </Grid>
+</Window>
