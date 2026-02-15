@@ -14,14 +14,17 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly ExtensionManager? _extManager;
     private readonly string? _widgetIdOverride;
+    private readonly WidgetSettings? _widgetSettingsOverride;
     private readonly Action? _widgetSettingsApplied;
     private bool _loading = true;
 
-    public SettingsWindow(AppSettings settings, ExtensionManager? extManager, string? widgetIdOverride = null, Action? widgetSettingsApplied = null)
+    public SettingsWindow(AppSettings settings, ExtensionManager? extManager, string? widgetIdOverride = null,
+        WidgetSettings? widgetSettingsOverride = null, Action? widgetSettingsApplied = null)
     {
         _settings = settings;
         _extManager = extManager;
         _widgetIdOverride = widgetIdOverride;
+        _widgetSettingsOverride = widgetSettingsOverride;
         _widgetSettingsApplied = widgetSettingsApplied;
         InitializeComponent();
         LoadSettings();
@@ -221,7 +224,7 @@ public partial class SettingsWindow : Window
     private void LoadWidgetSettings(string widgetId)
     {
         _loading = true;
-        var ws = _settings.GetWidgetSettings(widgetId);
+        var ws = ResolveWidgetSettings(widgetId);
 
         SliderOpacity.Value = ws.Opacity;
         TxtOpacityValue.Text = $"{(int)(ws.Opacity * 100)}%";
@@ -306,7 +309,7 @@ public partial class SettingsWindow : Window
     private void SaveWidgetSettings()
     {
         var widgetId = SelectedWidgetId;
-        var ws = _settings.GetWidgetSettings(widgetId);
+        var ws = ResolveWidgetSettings(widgetId);
         var kind = widgetId.Contains('_') ? widgetId[..widgetId.LastIndexOf('_')] : widgetId;
 
         ws.Opacity = SliderOpacity.Value;
@@ -327,7 +330,13 @@ public partial class SettingsWindow : Window
             if (!string.IsNullOrEmpty(folder))
                 ws.Custom["DefaultFolder"] = folder;
         }
+
+        if (_widgetSettingsOverride is not null && _widgetIdOverride is not null)
+            _settings.Widgets[_widgetIdOverride] = ws;
     }
+
+    private WidgetSettings ResolveWidgetSettings(string widgetId) =>
+        _widgetSettingsOverride ?? _settings.GetWidgetSettings(widgetId);
 
     // ── Save / Close ────────────────────────────────────────
     private void BtnSave_Click(object sender, RoutedEventArgs e)
@@ -344,7 +353,9 @@ public partial class SettingsWindow : Window
 
     private void ApplySettings()
     {
-        if (_widgetIdOverride is null)
+        var isWidgetSettings = _widgetIdOverride is not null;
+
+        if (!isWidgetSettings)
         {
             _settings.AccentColor = TxtAccentColor.Text;
             _settings.ThemeMode = SelectedThemeMode;
@@ -353,10 +364,12 @@ public partial class SettingsWindow : Window
                 _settings.CustomTheme = ReadCustomThemeFields();
         }
 
-        if (PanelWidgetSettings.Visibility == Visibility.Visible)
+        if (isWidgetSettings)
+        {
             SaveWidgetSettings();
+        }
 
-        if (_widgetIdOverride is null)
+        if (!isWidgetSettings)
         {
             var colors = ThemeHelper.ResolveColors(_settings);
             ThemeHelper.ApplyToApp(colors);

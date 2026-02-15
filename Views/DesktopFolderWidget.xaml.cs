@@ -56,48 +56,37 @@ public partial class DesktopFolderWidget : Window
         _widgetSettings = settings;
         _appSettings = appSettings;
 
-        // Apply per-widget custom color overrides
-        ThemeHelper.ApplyToElement(this, settings.CustomColors);
-
-        // Apply generic settings
-        Topmost = settings.Topmost;
-        Opacity = settings.Opacity;
-
-        // Apply custom settings
-        _folderPath = settings.Custom.TryGetValue("DefaultFolder", out var folder) && !string.IsNullOrEmpty(folder)
-            ? folder
-            : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-
-        if (settings.Custom.TryGetValue("DefaultSort", out var sort))
-        {
-            _sortMode = sort switch
-            {
-                "DateModified" => SortMode.DateModified,
-                "Size" => SortMode.Size,
-                "Type" => SortMode.Type,
-                _ => SortMode.Name
-            };
-        }
-
-        TxtPath.Text = _folderPath;
-        CmbSort.SelectedIndex = (int)_sortMode;
-        LoadFolder();
+        ApplyWidgetSettingsFromModel();
 
         Closed += (_, _) => ReleaseResources();
     }
 
+    private WidgetSettings SyncWidgetSettings()
+    {
+        var ws = _appSettings.GetWidgetSettings(_widgetId);
+        _widgetSettings.Kind = ws.Kind;
+        _widgetSettings.Opacity = ws.Opacity;
+        _widgetSettings.Topmost = ws.Topmost;
+        _widgetSettings.Custom = ws.Custom;
+        _widgetSettings.Shortcuts = ws.Shortcuts;
+        _widgetSettings.ViewMode = ws.ViewMode;
+        _widgetSettings.CustomColors = ws.CustomColors;
+        return ws;
+    }
+
     private void ApplyWidgetSettingsFromModel()
     {
-        ThemeHelper.ApplyToElement(this, _widgetSettings.CustomColors);
-        Topmost = _widgetSettings.Topmost;
-        Opacity = _widgetSettings.Opacity;
+        var ws = SyncWidgetSettings();
+        ThemeHelper.ApplyToElement(this, ws.CustomColors);
+        Topmost = ws.Topmost;
+        Opacity = ws.Opacity;
 
-        _folderPath = _widgetSettings.Custom.TryGetValue("DefaultFolder", out var folder) && !string.IsNullOrEmpty(folder)
+        _folderPath = ws.Custom.TryGetValue("DefaultFolder", out var folder) && !string.IsNullOrEmpty(folder)
             ? folder
             : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         TxtPath.Text = _folderPath;
 
-        if (_widgetSettings.Custom.TryGetValue("DefaultSort", out var sort))
+        if (ws.Custom.TryGetValue("DefaultSort", out var sort))
         {
             _sortMode = sort switch
             {
@@ -530,7 +519,7 @@ public partial class DesktopFolderWidget : Window
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)
     {
-        var win = new SettingsWindow(_appSettings, null, _widgetId, ApplyWidgetSettingsFromModel)
+        var win = new SettingsWindow(_appSettings, null, _widgetId, _widgetSettings, ApplyWidgetSettingsFromModel)
         {
             Owner = this
         };

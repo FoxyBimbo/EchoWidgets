@@ -33,27 +33,32 @@ public partial class ShortcutPanelWidget : Window
         _widgetSettings = settings;
         _appSettings = appSettings;
 
-        // Apply per-widget custom color overrides
-        ThemeHelper.ApplyToElement(this, settings.CustomColors);
-
-        Topmost = settings.Topmost;
-        Opacity = settings.Opacity;
-
-        settings.Custom.TryGetValue("Title", out var title);
-        TxtTitle.Text = string.IsNullOrEmpty(title) ? "Shortcuts" : title;
-
-        LoadShortcuts();
+        ApplyWidgetSettingsFromModel();
 
         Closed += (_, _) => ReleaseResources();
     }
 
+    private WidgetSettings SyncWidgetSettings()
+    {
+        var ws = _appSettings.GetWidgetSettings(_widgetId);
+        _widgetSettings.Kind = ws.Kind;
+        _widgetSettings.Opacity = ws.Opacity;
+        _widgetSettings.Topmost = ws.Topmost;
+        _widgetSettings.Custom = ws.Custom;
+        _widgetSettings.Shortcuts = ws.Shortcuts;
+        _widgetSettings.ViewMode = ws.ViewMode;
+        _widgetSettings.CustomColors = ws.CustomColors;
+        return ws;
+    }
+
     private void ApplyWidgetSettingsFromModel()
     {
-        ThemeHelper.ApplyToElement(this, _widgetSettings.CustomColors);
-        Topmost = _widgetSettings.Topmost;
-        Opacity = _widgetSettings.Opacity;
+        var ws = SyncWidgetSettings();
+        ThemeHelper.ApplyToElement(this, ws.CustomColors);
+        Topmost = ws.Topmost;
+        Opacity = ws.Opacity;
 
-        _widgetSettings.Custom.TryGetValue("Title", out var title);
+        ws.Custom.TryGetValue("Title", out var title);
         TxtTitle.Text = string.IsNullOrEmpty(title) ? "Shortcuts" : title;
         LoadShortcuts();
     }
@@ -352,7 +357,7 @@ public partial class ShortcutPanelWidget : Window
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)
     {
-        var win = new SettingsWindow(_appSettings, null, _widgetId, ApplyWidgetSettingsFromModel)
+        var win = new SettingsWindow(_appSettings, null, _widgetId, _widgetSettings, ApplyWidgetSettingsFromModel)
         {
             Owner = this
         };
