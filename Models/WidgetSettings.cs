@@ -21,6 +21,9 @@ public class WidgetSettings
     /// <summary>Shortcut entries for ShortcutPanel widgets.</summary>
     public List<ShortcutItem> Shortcuts { get; set; } = [];
 
+    /// <summary>View mode for ShortcutPanel widgets: "List" or "Grid".</summary>
+    public string ViewMode { get; set; } = "List";
+
     /// <summary>
     /// Optional per-widget custom color override. When non-null the widget
     /// uses these colors instead of the global theme.

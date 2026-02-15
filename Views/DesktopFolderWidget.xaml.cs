@@ -24,6 +24,8 @@ public partial class DesktopFolderWidget : Window
     private SortMode _sortMode = SortMode.Name;
     private bool _sortDescending;
     private readonly WidgetSettings _widgetSettings;
+    private readonly AppSettings _appSettings;
+    private const int AutoDockThreshold = 2;
 
     // ── Drag state ───────────────────────────────────────────
     private System.Windows.Point _dragStartPoint;
@@ -45,13 +47,14 @@ public partial class DesktopFolderWidget : Window
 
     public string WidgetId => _widgetId;
 
-    public DesktopFolderWidget() : this("DesktopFolder", new WidgetSettings { Topmost = false }) { }
+    public DesktopFolderWidget() : this("DesktopFolder", new WidgetSettings { Topmost = false }, new AppSettings()) { }
 
-    public DesktopFolderWidget(string widgetId, WidgetSettings settings)
+    public DesktopFolderWidget(string widgetId, WidgetSettings settings, AppSettings appSettings)
     {
         InitializeComponent();
         _widgetId = widgetId;
         _widgetSettings = settings;
+        _appSettings = appSettings;
 
         // Apply per-widget custom color overrides
         ThemeHelper.ApplyToElement(this, settings.CustomColors);
@@ -83,6 +86,31 @@ public partial class DesktopFolderWidget : Window
         Closed += (_, _) => ReleaseResources();
     }
 
+    private void ApplyWidgetSettingsFromModel()
+    {
+        ThemeHelper.ApplyToElement(this, _widgetSettings.CustomColors);
+        Topmost = _widgetSettings.Topmost;
+        Opacity = _widgetSettings.Opacity;
+
+        _folderPath = _widgetSettings.Custom.TryGetValue("DefaultFolder", out var folder) && !string.IsNullOrEmpty(folder)
+            ? folder
+            : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        TxtPath.Text = _folderPath;
+
+        if (_widgetSettings.Custom.TryGetValue("DefaultSort", out var sort))
+        {
+            _sortMode = sort switch
+            {
+                "DateModified" => SortMode.DateModified,
+                "Size" => SortMode.Size,
+                "Type" => SortMode.Type,
+                _ => SortMode.Name
+            };
+        }
+        CmbSort.SelectedIndex = (int)_sortMode;
+        LoadFolder();
+    }
+
     private void Window_SourceInitialized(object sender, EventArgs e)
     {
         var screen = Screen.PrimaryScreen!.WorkingArea;
@@ -96,13 +124,46 @@ public partial class DesktopFolderWidget : Window
         if (sender is Button btn && btn.Tag is string edgeName &&
             Enum.TryParse<DockEdge>(edgeName, out var edge))
         {
-            DockTo(edge);
+            if (_isDocked && edge == _currentEdge)
+                Undock();
+            else
+                DockTo(edge);
         }
     }
 
     private void BtnUndock_Click(object sender, RoutedEventArgs e)
     {
         Undock();
+    }
+
+    private DockEdge GetAutoDockEdgeFromCursor()
+    {
+        var screen = Screen.PrimaryScreen!.Bounds;
+        var cursor = System.Windows.Forms.Cursor.Position;
+
+        int leftDistance = Math.Abs(cursor.X - screen.Left);
+        int rightDistance = Math.Abs(screen.Right - cursor.X);
+        int topDistance = Math.Abs(cursor.Y - screen.Top);
+        int bottomDistance = Math.Abs(screen.Bottom - cursor.Y);
+
+        int min = Math.Min(Math.Min(leftDistance, rightDistance), Math.Min(topDistance, bottomDistance));
+        if (min > AutoDockThreshold)
+            return DockEdge.None;
+
+        if (min == leftDistance) return DockEdge.Left;
+        if (min == rightDistance) return DockEdge.Right;
+        if (min == topDistance) return DockEdge.Top;
+        return DockEdge.Bottom;
+    }
+
+    private void TryAutoDockFromPosition()
+    {
+        if (_isDocked)
+            return;
+
+        var edge = GetAutoDockEdgeFromCursor();
+        if (edge != DockEdge.None)
+            DockTo(edge);
     }
 
     private void DockTo(DockEdge edge)
@@ -122,8 +183,10 @@ public partial class DesktopFolderWidget : Window
         ShowResizeGrip(edge);
     }
 
-    private void Undock()
+    private void Undock(bool preservePosition = false)
     {
+        var currentLeft = Left;
+        var currentTop = Top;
         _isDocked = false;
         _currentEdge = DockEdge.None;
         MainWindow.DockManager.Undock(WidgetId);
@@ -138,9 +201,17 @@ public partial class DesktopFolderWidget : Window
 
         Width = 320;
         Height = 420;
-        var screen = Screen.PrimaryScreen!.WorkingArea;
-        Left = (screen.Width - Width) / 2;
-        Top = (screen.Height - Height) / 2;
+        if (preservePosition)
+        {
+            Left = currentLeft;
+            Top = currentTop;
+        }
+        else
+        {
+            var screen = Screen.PrimaryScreen!.WorkingArea;
+            Left = (screen.Width - Width) / 2;
+            Top = (screen.Height - Height) / 2;
+        }
         HighlightActiveEdge(DockEdge.None);
         ResizeGrip.Visibility = Visibility.Collapsed;
     }
@@ -457,6 +528,15 @@ public partial class DesktopFolderWidget : Window
         Close();
     }
 
+    private void BtnSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new SettingsWindow(_appSettings, null, _widgetId, ApplyWidgetSettingsFromModel)
+        {
+            Owner = this
+        };
+        win.ShowDialog();
+    }
+
     private void ReleaseResources()
     {
         // Clear icon image references from all items
@@ -475,8 +555,14 @@ public partial class DesktopFolderWidget : Window
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (!_isDocked && e.LeftButton == MouseButtonState.Pressed)
-            DragMove();
+        if (e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        if (_isDocked)
+            Undock(true);
+
+        DragMove();
+        TryAutoDockFromPosition();
     }
 }
 

@@ -27,6 +27,10 @@
                         <Button Content="✕" Click="BtnClose_Click" DockPanel.Dock="Right"
                                 Background="Transparent" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="Transparent"
                                 FontSize="14" Padding="4,0" Cursor="Hand" MinWidth="24"/>
+                        <Button Content="⚙" Click="BtnSettings_Click" DockPanel.Dock="Right"
+                                Background="Transparent" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="Transparent"
+                                FontSize="14" Padding="4,0" Cursor="Hand" MinWidth="24"
+                                ToolTip="Settings"/>
                         <TextBlock x:Name="TxtFolderName" Text="Desktop" FontSize="16"
                                    FontWeight="Bold" Foreground="{DynamicResource ForegroundBrush}" VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis"/>
@@ -35,25 +39,25 @@
                     <!-- Dock position selector -->
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
                         <TextBlock Text="Dock:" Foreground="{DynamicResource MutedForegroundBrush}" VerticalAlignment="Center"
-                                   FontSize="11" Margin="0,0,6,0"/>
+                                   FontSize="10" Margin="0,0,6,0"/>
                         <Button x:Name="BtnDockLeft" Content="◀" Click="BtnDock_Click" Tag="Left"
-                                Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                                Width="22" Height="20" FontSize="10" Cursor="Hand" Margin="0,0,2,0"
                                 Background="{DynamicResource ControlBackgroundBrush}" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                 ToolTip="Dock Left"/>
                         <Button x:Name="BtnDockTop" Content="▲" Click="BtnDock_Click" Tag="Top"
-                                Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                                Width="22" Height="20" FontSize="10" Cursor="Hand" Margin="0,0,2,0"
                                 Background="{DynamicResource ControlBackgroundBrush}" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                 ToolTip="Dock Top"/>
                         <Button x:Name="BtnDockBottom" Content="▼" Click="BtnDock_Click" Tag="Bottom"
-                                Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                                Width="22" Height="20" FontSize="10" Cursor="Hand" Margin="0,0,2,0"
                                 Background="{DynamicResource ControlBackgroundBrush}" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                 ToolTip="Dock Bottom"/>
                         <Button x:Name="BtnDockRight" Content="▶" Click="BtnDock_Click" Tag="Right"
-                                Width="28" Height="24" FontSize="11" Cursor="Hand" Margin="0,0,2,0"
+                                Width="22" Height="20" FontSize="10" Cursor="Hand" Margin="0,0,2,0"
                                 Background="{DynamicResource ControlBackgroundBrush}" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                 ToolTip="Dock Right"/>
-                        <Button x:Name="BtnUndock" Content="Undock" Click="BtnUndock_Click"
-                                Height="24" FontSize="11" Cursor="Hand" Padding="8,0"
+                        <Button x:Name="BtnUndock" Content="⤢" Click="BtnUndock_Click"
+                                Width="26" Height="20" FontSize="10" Cursor="Hand" Padding="0"
                                 Background="{DynamicResource ControlBackgroundBrush}" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="{DynamicResource BorderBrush}"
                                 ToolTip="Float freely" Margin="4,0,0,0"/>
                     </StackPanel>

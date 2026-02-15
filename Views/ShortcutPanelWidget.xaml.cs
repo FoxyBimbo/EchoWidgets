@@ -8,6 +8,7 @@ using EchoUI.Models;
 using EchoUI.Services;
 using ContextMenu = System.Windows.Controls.ContextMenu;
 using MenuItem = System.Windows.Controls.MenuItem;
+using Button = System.Windows.Controls.Button;
 
 namespace EchoUI.Views;
 
@@ -15,17 +16,22 @@ public partial class ShortcutPanelWidget : Window
 {
     private readonly string _widgetId;
     private readonly WidgetSettings _widgetSettings;
+    private readonly AppSettings _appSettings;
     private bool _isCollapsed;
     private bool _titleDragging;
     private System.Windows.Point _titleDragStart;
+    private bool _isDocked;
+    private DockEdge _currentEdge = DockEdge.None;
+    private const int AutoDockThreshold = 2;
 
     public string WidgetId => _widgetId;
 
-    public ShortcutPanelWidget(string widgetId, WidgetSettings settings)
+    public ShortcutPanelWidget(string widgetId, WidgetSettings settings, AppSettings appSettings)
     {
         InitializeComponent();
         _widgetId = widgetId;
         _widgetSettings = settings;
+        _appSettings = appSettings;
 
         // Apply per-widget custom color overrides
         ThemeHelper.ApplyToElement(this, settings.CustomColors);
@@ -39,6 +45,17 @@ public partial class ShortcutPanelWidget : Window
         LoadShortcuts();
 
         Closed += (_, _) => ReleaseResources();
+    }
+
+    private void ApplyWidgetSettingsFromModel()
+    {
+        ThemeHelper.ApplyToElement(this, _widgetSettings.CustomColors);
+        Topmost = _widgetSettings.Topmost;
+        Opacity = _widgetSettings.Opacity;
+
+        _widgetSettings.Custom.TryGetValue("Title", out var title);
+        TxtTitle.Text = string.IsNullOrEmpty(title) ? "Shortcuts" : title;
+        LoadShortcuts();
     }
 
     private void Window_SourceInitialized(object sender, EventArgs e)
@@ -102,7 +119,10 @@ public partial class ShortcutPanelWidget : Window
              Math.Abs(diff.Y) > SystemParameters.MinimumVerticalDragDistance))
         {
             _titleDragging = true;
+            if (_isDocked)
+                Undock(true);
             DragMove();
+            TryAutoDockFromPosition();
         }
     }
 
@@ -111,6 +131,7 @@ public partial class ShortcutPanelWidget : Window
         if (_titleDragging)
         {
             _titleDragging = false;
+            TryAutoDockFromPosition();
             return;
         }
 
@@ -151,6 +172,110 @@ public partial class ShortcutPanelWidget : Window
             _widgetSettings.Shortcuts.Add(dlg.Result);
             LoadShortcuts();
         }
+    }
+
+    // ── Dock / Undock ───────────────────────────────────────
+    private void BtnDock_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string edgeName &&
+            Enum.TryParse<DockEdge>(edgeName, out var edge))
+        {
+            if (_isDocked && edge == _currentEdge)
+                Undock();
+            else
+                DockTo(edge);
+        }
+    }
+
+    private void BtnUndock_Click(object sender, RoutedEventArgs e)
+    {
+        Undock();
+    }
+
+    private void DockTo(DockEdge edge)
+    {
+        _currentEdge = edge;
+        _isDocked = true;
+
+        RootBorder.SetResourceReference(Border.BackgroundProperty, "WindowBackgroundBrush");
+        RootBorder.CornerRadius = new CornerRadius(0);
+        RootBorder.Margin = new Thickness(0);
+        RootBorder.Effect = null;
+
+        double thickness = edge is DockEdge.Left or DockEdge.Right ? 260 : 180;
+
+        MainWindow.DockManager.Dock(WidgetId, this, edge, thickness);
+        HighlightActiveEdge(edge);
+    }
+
+    private void Undock(bool preservePosition = false)
+    {
+        var currentLeft = Left;
+        var currentTop = Top;
+        _isDocked = false;
+        _currentEdge = DockEdge.None;
+        MainWindow.DockManager.Undock(WidgetId);
+
+        RootBorder.SetResourceReference(Border.BackgroundProperty, "WindowBackgroundSemiBrush");
+        RootBorder.CornerRadius = new CornerRadius(14);
+        RootBorder.Margin = new Thickness(8);
+        RootBorder.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 16, ShadowDepth = 2, Opacity = 0.5, Color = Colors.Black
+        };
+
+        Width = 260;
+        Height = 320;
+        if (preservePosition)
+        {
+            Left = currentLeft;
+            Top = currentTop;
+        }
+        else
+        {
+            var screen = System.Windows.Forms.Screen.PrimaryScreen!.WorkingArea;
+            Left = (screen.Width - Width) / 2;
+            Top = (screen.Height - Height) / 2;
+        }
+        HighlightActiveEdge(DockEdge.None);
+    }
+
+    private void HighlightActiveEdge(DockEdge edge)
+    {
+        BtnDockLeft.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Left ? "AccentBrush" : "ControlBackgroundBrush");
+        BtnDockRight.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Right ? "AccentBrush" : "ControlBackgroundBrush");
+        BtnDockTop.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Top ? "AccentBrush" : "ControlBackgroundBrush");
+        BtnDockBottom.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Bottom ? "AccentBrush" : "ControlBackgroundBrush");
+    }
+
+    private DockEdge GetAutoDockEdgeFromCursor()
+    {
+        var screen = System.Windows.Forms.Screen.PrimaryScreen!.Bounds;
+        var cursor = System.Windows.Forms.Cursor.Position;
+
+        int leftDistance = Math.Abs(cursor.X - screen.Left);
+        int rightDistance = Math.Abs(screen.Right - cursor.X);
+        int topDistance = Math.Abs(cursor.Y - screen.Top);
+        int bottomDistance = Math.Abs(screen.Bottom - cursor.Y);
+
+        int min = Math.Min(Math.Min(leftDistance, rightDistance), Math.Min(topDistance, bottomDistance));
+        if (min > AutoDockThreshold)
+            return DockEdge.None;
+
+        if (min == leftDistance) return DockEdge.Left;
+        if (min == rightDistance) return DockEdge.Right;
+        if (min == topDistance) return DockEdge.Top;
+        return DockEdge.Bottom;
+    }
+
+    private void TryAutoDockFromPosition()
+    {
+        if (_isDocked)
+            return;
+
+        var edge = GetAutoDockEdgeFromCursor();
+        if (edge != DockEdge.None)
+            DockTo(edge);
     }
 
     // ── Launch shortcut (single click) ──────────────────────
@@ -225,6 +350,15 @@ public partial class ShortcutPanelWidget : Window
         Close();
     }
 
+    private void BtnSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new SettingsWindow(_appSettings, null, _widgetId, ApplyWidgetSettingsFromModel)
+        {
+            Owner = this
+        };
+        win.ShowDialog();
+    }
+
     private void ReleaseResources()
     {
         foreach (var s in _widgetSettings.Shortcuts)
@@ -237,7 +371,13 @@ public partial class ShortcutPanelWidget : Window
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed)
-            DragMove();
+        if (e.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        if (_isDocked)
+            Undock(true);
+
+        DragMove();
+        TryAutoDockFromPosition();
     }
 }

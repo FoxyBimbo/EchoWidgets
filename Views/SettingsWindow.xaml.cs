@@ -12,13 +12,17 @@ namespace EchoUI.Views;
 public partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
-    private readonly ExtensionManager _extManager;
+    private readonly ExtensionManager? _extManager;
+    private readonly string? _widgetIdOverride;
+    private readonly Action? _widgetSettingsApplied;
     private bool _loading = true;
 
-    public SettingsWindow(AppSettings settings, ExtensionManager extManager)
+    public SettingsWindow(AppSettings settings, ExtensionManager? extManager, string? widgetIdOverride = null, Action? widgetSettingsApplied = null)
     {
         _settings = settings;
         _extManager = extManager;
+        _widgetIdOverride = widgetIdOverride;
+        _widgetSettingsApplied = widgetSettingsApplied;
         InitializeComponent();
         LoadSettings();
     }
@@ -27,7 +31,8 @@ public partial class SettingsWindow : Window
     {
         _loading = true;
         TxtAccentColor.Text = _settings.AccentColor;
-        LstExtensions.ItemsSource = _extManager.Extensions;
+        if (_extManager is not null)
+            LstExtensions.ItemsSource = _extManager.Extensions;
 
         // Theme mode
         CmbThemeMode.SelectedIndex = _settings.ThemeMode switch
@@ -39,8 +44,34 @@ public partial class SettingsWindow : Window
         };
         LoadCustomThemeFields();
 
-        LoadWidgetSettings("DesktopFolder");
+        ConfigureSectionVisibility();
+        if (_widgetIdOverride is not null)
+        {
+            LoadWidgetSettings(_widgetIdOverride);
+        }
+        else
+        {
+            LoadWidgetSettings("DesktopFolder");
+        }
         _loading = false;
+    }
+
+    private void ConfigureSectionVisibility()
+    {
+        if (_widgetIdOverride is not null)
+        {
+            PanelThemeSettings.Visibility = Visibility.Collapsed;
+            PanelGeneralSettings.Visibility = Visibility.Collapsed;
+            PanelExtensions.Visibility = Visibility.Collapsed;
+            PanelWidgetSettings.Visibility = Visibility.Visible;
+            PanelWidgetSelector.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        PanelWidgetSettings.Visibility = Visibility.Collapsed;
+        PanelThemeSettings.Visibility = Visibility.Visible;
+        PanelGeneralSettings.Visibility = Visibility.Visible;
+        PanelExtensions.Visibility = _extManager is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     // ── Theme mode ──────────────────────────────────────────
@@ -183,6 +214,7 @@ public partial class SettingsWindow : Window
     private void CmbWidgetSelect_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_loading) return;
+        if (_widgetIdOverride is not null) return;
         LoadWidgetSettings(SelectedWidgetId);
     }
 
@@ -275,12 +307,13 @@ public partial class SettingsWindow : Window
     {
         var widgetId = SelectedWidgetId;
         var ws = _settings.GetWidgetSettings(widgetId);
+        var kind = widgetId.Contains('_') ? widgetId[..widgetId.LastIndexOf('_')] : widgetId;
 
         ws.Opacity = SliderOpacity.Value;
         ws.Topmost = ChkTopmost.IsChecked == true;
         ws.CustomColors = ReadWidgetColorFields();
 
-        if (widgetId == "DesktopFolder")
+        if (kind == "DesktopFolder")
         {
             ws.Custom["DefaultSort"] = CmbDefaultSort.SelectedIndex switch
             {
@@ -299,21 +332,38 @@ public partial class SettingsWindow : Window
     // ── Save / Close ────────────────────────────────────────
     private void BtnSave_Click(object sender, RoutedEventArgs e)
     {
-        _settings.AccentColor = TxtAccentColor.Text;
-        _settings.ThemeMode = SelectedThemeMode;
-
-        if (SelectedThemeMode == "Custom")
-            _settings.CustomTheme = ReadCustomThemeFields();
-
-        SaveWidgetSettings();
-
-        // Apply the global theme immediately
-        var colors = ThemeHelper.ResolveColors(_settings);
-        ThemeHelper.ApplyToApp(colors);
-
-        _settings.Save();
+        ApplySettings();
         DialogResult = true;
         Close();
+    }
+
+    private void BtnApply_Click(object sender, RoutedEventArgs e)
+    {
+        ApplySettings();
+    }
+
+    private void ApplySettings()
+    {
+        if (_widgetIdOverride is null)
+        {
+            _settings.AccentColor = TxtAccentColor.Text;
+            _settings.ThemeMode = SelectedThemeMode;
+
+            if (SelectedThemeMode == "Custom")
+                _settings.CustomTheme = ReadCustomThemeFields();
+        }
+
+        if (PanelWidgetSettings.Visibility == Visibility.Visible)
+            SaveWidgetSettings();
+
+        if (_widgetIdOverride is null)
+        {
+            var colors = ThemeHelper.ResolveColors(_settings);
+            ThemeHelper.ApplyToApp(colors);
+        }
+
+        _settings.Save();
+        _widgetSettingsApplied?.Invoke();
     }
 
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
