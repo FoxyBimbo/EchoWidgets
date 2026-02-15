@@ -15,6 +15,66 @@ public class AppSettings
     public List<string> PinnedAppPaths { get; set; } = [];
     public List<string> EnabledExtensions { get; set; } = [];
 
+    /// <summary>Theme mode: "Dark", "Light", "Auto", or "Custom".</summary>
+    public string ThemeMode { get; set; } = "Auto";
+
+    /// <summary>Custom color scheme used when ThemeMode is "Custom".</summary>
+    public ThemeColors? CustomTheme { get; set; }
+
+    /// <summary>Per-widget settings keyed by widget id.</summary>
+    public Dictionary<string, WidgetSettings> Widgets { get; set; } = [];
+
+    /// <summary>
+    /// Returns settings for a widget, creating defaults if missing.
+    /// </summary>
+    public WidgetSettings GetWidgetSettings(string widgetId)
+    {
+        if (Widgets.TryGetValue(widgetId, out var ws))
+            return ws;
+
+        ws = GetDefaultWidgetSettings(widgetId);
+        Widgets[widgetId] = ws;
+        return ws;
+    }
+
+    /// <summary>
+    /// Creates a new widget instance with a unique ID and returns (id, settings).
+    /// </summary>
+    public (string Id, WidgetSettings Settings) CreateWidgetInstance(string kind)
+    {
+        int counter = 1;
+        string id;
+        do { id = $"{kind}_{counter++}"; }
+        while (Widgets.ContainsKey(id));
+
+        var ws = GetDefaultWidgetSettings(kind);
+        ws.Kind = kind;
+        Widgets[id] = ws;
+        return (id, ws);
+    }
+
+    /// <summary>
+    /// Removes a widget instance from saved settings.
+    /// </summary>
+    public void RemoveWidgetInstance(string widgetId) => Widgets.Remove(widgetId);
+
+    private static WidgetSettings GetDefaultWidgetSettings(string widgetId)
+    {
+        var kind = widgetId.Contains('_') ? widgetId[..widgetId.LastIndexOf('_')] : widgetId;
+        return kind switch
+        {
+            "DesktopFolder" => new WidgetSettings { Kind = "DesktopFolder", Topmost = false, Opacity = 1.0 },
+            "ShortcutPanel" => new WidgetSettings
+            {
+                Kind = "ShortcutPanel",
+                Topmost = false,
+                Opacity = 1.0,
+                Custom = new() { ["Title"] = "Shortcuts" }
+            },
+            _ => new WidgetSettings { Kind = kind }
+        };
+    }
+
     private static readonly string SettingsDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "EchoUI");
 

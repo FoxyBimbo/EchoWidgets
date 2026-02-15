@@ -2,6 +2,7 @@
 using System.Drawing;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using EchoUI.Models;
 using EchoUI.Services;
 using EchoUI.Views;
@@ -17,8 +18,10 @@ public partial class MainWindow : Window
     private readonly ScriptEngine _scriptEngine;
     private readonly ObservableCollection<AppNotification> _notifications = [];
     private readonly System.Windows.Forms.NotifyIcon _trayIcon;
+    private readonly FullscreenWatcher _fullscreenWatcher;
 
-    private DesktopFolderWidget? _folderWidget;
+    /// <summary>All open widget windows keyed by their unique instance ID.</summary>
+    private readonly Dictionary<string, Window> _widgets = [];
 
     public static WidgetDockManager DockManager { get; } = new();
 
@@ -33,16 +36,25 @@ public partial class MainWindow : Window
         var api = new TaskbarScriptApi(AddNotification, (_, _) => { });
         _scriptEngine.ExposeApi("echo", api);
 
+        // ── Fullscreen watcher ──────────────────────────────
+        _fullscreenWatcher = new FullscreenWatcher();
+        _fullscreenWatcher.FullscreenEntered += () =>
+            Dispatcher.Invoke(() => DockManager.SetFullscreenMode(true));
+        _fullscreenWatcher.FullscreenExited += () =>
+            Dispatcher.Invoke(() => DockManager.SetFullscreenMode(false));
+        _fullscreenWatcher.Start();
+
         // ── System tray icon ────────────────────────────────
         _trayIcon = new System.Windows.Forms.NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = new Icon(Application.GetResourceStream(new Uri("pack://application:,,,/AppIcon.ico"))!.Stream),
             Text = "EchoUI",
             Visible = true
         };
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Desktop Folder Widget", null, (_, _) => ToggleFolderWidget());
+        menu.Items.Add("New Desktop Folder Widget", null, (_, _) => SpawnWidget("DesktopFolder"));
+        menu.Items.Add("New Shortcut Panel Widget", null, (_, _) => SpawnWidget("ShortcutPanel"));
         menu.Items.Add("Run Plugins", null, (_, _) => RunPlugins());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Notifications", null, (_, _) => ShowNotifications());
@@ -62,36 +74,81 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _fullscreenWatcher.Dispose();
+        CloseAllWidgets();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         DockManager.RestoreAll();
     }
 
-    // ── Folder Widget ───────────────────────────────────────
-    private void ToggleFolderWidget()
-    {
-        if (_folderWidget is { IsLoaded: true })
-        {
-            DockManager.Undock("DesktopFolder");
-            _folderWidget.Close();
-            _folderWidget = null;
-        }
-        else
-        {
-            _folderWidget = new DesktopFolderWidget();
-            _folderWidget.Closed += (_, _) =>
-            {
-                DockManager.Undock("DesktopFolder");
-                _folderWidget = null;
-            };
-            _folderWidget.Show();
+    // ── Widget management ───────────────────────────────────
 
-            foreach (var widget in _extManager.GetWidgets())
+    private void SpawnWidget(string kind)
+    {
+        var (id, ws) = _settings.CreateWidgetInstance(kind);
+
+        Window widget = kind switch
+        {
+            "ShortcutPanel" => new ShortcutPanelWidget(id, ws),
+            _ => new DesktopFolderWidget(id, ws)
+        };
+
+        _widgets[id] = widget;
+        widget.Closed += OnWidgetClosed;
+        DockManager.TrackFloatingWidget(widget);
+        widget.Show();
+
+        if (kind == "DesktopFolder")
+        {
+            foreach (var ext in _extManager.GetWidgets())
             {
-                var code = _extManager.ReadScript(widget);
-                _scriptEngine.Run(code, widget.ScriptType);
+                var code = _extManager.ReadScript(ext);
+                _scriptEngine.Run(code, ext.ScriptType);
             }
         }
+    }
+
+    private void OnWidgetClosed(object? sender, EventArgs e)
+    {
+        if (sender is not Window win) return;
+
+        string? id = sender switch
+        {
+            DesktopFolderWidget dfw => dfw.WidgetId,
+            ShortcutPanelWidget spw => spw.WidgetId,
+            _ => null
+        };
+        if (id is null) return;
+
+        DockManager.Undock(id);
+        DockManager.UntrackFloatingWidget(win);
+        win.Closed -= OnWidgetClosed;
+        _widgets.Remove(id);
+
+        // Save shortcut panel state before removing the settings reference
+        if (sender is ShortcutPanelWidget)
+            _settings.Save();
+
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+    }
+
+    private void CloseAllWidgets()
+    {
+        foreach (var (id, win) in _widgets.ToList())
+        {
+            DockManager.Undock(id);
+            DockManager.UntrackFloatingWidget(win);
+            win.Closed -= OnWidgetClosed;
+            win.Close();
+        }
+        _widgets.Clear();
+        _settings.Save();
+
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
     }
 
     // ── Plugins ─────────────────────────────────────────────
@@ -135,7 +192,21 @@ public partial class MainWindow : Window
     private void OpenSettings()
     {
         var win = new SettingsWindow(_settings, _extManager);
-        win.ShowDialog();
+        if (win.ShowDialog() == true)
+        {
+            ApplyWidgetSettings();
+        }
+    }
+
+    private void ApplyWidgetSettings()
+    {
+        foreach (var (id, win) in _widgets)
+        {
+            var ws = _settings.GetWidgetSettings(id);
+            win.Topmost = ws.Topmost;
+            win.Opacity = ws.Opacity;
+            ThemeHelper.ApplyToElement(win, ws.CustomColors);
+        }
     }
 
     // ── Exit ────────────────────────────────────────────────

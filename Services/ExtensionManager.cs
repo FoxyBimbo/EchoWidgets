@@ -11,6 +11,9 @@ public class ExtensionManager
     private static readonly string PluginsDir = Path.Combine(ExtensionsDir, "Plugins");
     private static readonly string WidgetsDir = Path.Combine(ExtensionsDir, "Widgets");
 
+    public string PluginsFolderPath => PluginsDir;
+    public string WidgetsFolderPath => WidgetsDir;
+
     public List<ExtensionInfo> Extensions { get; } = [];
 
     public ExtensionManager()
@@ -75,13 +78,23 @@ public class ExtensionManager
                 """);
         }
 
-        var sampleWidget = Path.Combine(WidgetsDir, "DesktopFolder.js");
-        if (!File.Exists(sampleWidget))
+        var sampleDesktopFolder = Path.Combine(WidgetsDir, "DesktopFolder.js");
+        if (!File.Exists(sampleDesktopFolder))
         {
-            File.WriteAllText(sampleWidget, """
+            File.WriteAllText(sampleDesktopFolder, """
                 // DesktopFolder widget – built-in, handled natively.
                 // This marker file tells EchoUI to show the Desktop Folder widget.
                 echo.notify("DesktopFolder", "Desktop folder widget is active.");
+                """);
+        }
+
+        var sampleShortcutPanel = Path.Combine(WidgetsDir, "ShortcutPanel.js");
+        if (!File.Exists(sampleShortcutPanel))
+        {
+            File.WriteAllText(sampleShortcutPanel, """
+                // ShortcutPanel widget – built-in, handled natively.
+                // This marker file tells EchoUI to show the Shortcut Panel widget.
+                echo.notify("ShortcutPanel", "Shortcut panel widget is active.");
                 """);
         }
     }

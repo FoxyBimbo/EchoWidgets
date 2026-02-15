@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using EchoUI.Models;
 using EchoUI.Services;
 using Button = System.Windows.Controls.Button;
@@ -16,10 +17,19 @@ namespace EchoUI.Views;
 
 public partial class DesktopFolderWidget : Window
 {
-    private const string WidgetId = "DesktopFolder";
+    private readonly string _widgetId;
     private string _folderPath;
     private DockEdge _currentEdge = DockEdge.None;
     private bool _isDocked;
+    private SortMode _sortMode = SortMode.Name;
+    private bool _sortDescending;
+    private readonly WidgetSettings _widgetSettings;
+
+    // ── Drag state ───────────────────────────────────────────
+    private System.Windows.Point _dragStartPoint;
+    private string? _dragItemPath;
+    private bool _didDrag;
+    private bool _dragIsLeftButton;
 
     // ── Resize state ────────────────────────────────────────
     private bool _isResizing;
@@ -33,12 +43,44 @@ public partial class DesktopFolderWidget : Window
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int x, y; }
 
-    public DesktopFolderWidget()
+    public string WidgetId => _widgetId;
+
+    public DesktopFolderWidget() : this("DesktopFolder", new WidgetSettings { Topmost = false }) { }
+
+    public DesktopFolderWidget(string widgetId, WidgetSettings settings)
     {
         InitializeComponent();
-        _folderPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        _widgetId = widgetId;
+        _widgetSettings = settings;
+
+        // Apply per-widget custom color overrides
+        ThemeHelper.ApplyToElement(this, settings.CustomColors);
+
+        // Apply generic settings
+        Topmost = settings.Topmost;
+        Opacity = settings.Opacity;
+
+        // Apply custom settings
+        _folderPath = settings.Custom.TryGetValue("DefaultFolder", out var folder) && !string.IsNullOrEmpty(folder)
+            ? folder
+            : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+
+        if (settings.Custom.TryGetValue("DefaultSort", out var sort))
+        {
+            _sortMode = sort switch
+            {
+                "DateModified" => SortMode.DateModified,
+                "Size" => SortMode.Size,
+                "Type" => SortMode.Type,
+                _ => SortMode.Name
+            };
+        }
+
         TxtPath.Text = _folderPath;
+        CmbSort.SelectedIndex = (int)_sortMode;
         LoadFolder();
+
+        Closed += (_, _) => ReleaseResources();
     }
 
     private void Window_SourceInitialized(object sender, EventArgs e)
@@ -68,7 +110,7 @@ public partial class DesktopFolderWidget : Window
         _currentEdge = edge;
         _isDocked = true;
 
-        RootBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF1E1E2E"));
+        RootBorder.SetResourceReference(Border.BackgroundProperty, "WindowBackgroundBrush");
         RootBorder.CornerRadius = new CornerRadius(0);
         RootBorder.Margin = new Thickness(0);
         RootBorder.Effect = null;
@@ -86,7 +128,7 @@ public partial class DesktopFolderWidget : Window
         _currentEdge = DockEdge.None;
         MainWindow.DockManager.Undock(WidgetId);
 
-        RootBorder.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#DD1E1E2E"));
+        RootBorder.SetResourceReference(Border.BackgroundProperty, "WindowBackgroundSemiBrush");
         RootBorder.CornerRadius = new CornerRadius(14);
         RootBorder.Margin = new Thickness(8);
         RootBorder.Effect = new System.Windows.Media.Effects.DropShadowEffect
@@ -193,12 +235,10 @@ public partial class DesktopFolderWidget : Window
     // ── Edge highlighting ───────────────────────────────────
     private void HighlightActiveEdge(DockEdge edge)
     {
-        var active = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF3A86FF"));
-        var inactive = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FF2A2A3E"));
-        BtnDockLeft.Background = edge == DockEdge.Left ? active : inactive;
-        BtnDockRight.Background = edge == DockEdge.Right ? active : inactive;
-        BtnDockTop.Background = edge == DockEdge.Top ? active : inactive;
-        BtnDockBottom.Background = edge == DockEdge.Bottom ? active : inactive;
+        BtnDockLeft.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Left ? "AccentBrush" : "ControlBackgroundBrush");
+        BtnDockRight.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Right ? "AccentBrush" : "ControlBackgroundBrush");
+        BtnDockTop.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Top ? "AccentBrush" : "ControlBackgroundBrush");
+        BtnDockBottom.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Bottom ? "AccentBrush" : "ControlBackgroundBrush");
     }
 
     // ── Folder browsing ─────────────────────────────────────
@@ -213,43 +253,94 @@ public partial class DesktopFolderWidget : Window
         {
             foreach (var dir in Directory.GetDirectories(_folderPath))
             {
+                var di = new DirectoryInfo(dir);
                 items.Add(new FolderItem
                 {
-                    DisplayName = Path.GetFileName(dir),
+                    DisplayName = di.Name,
                     FullPath = dir,
-                    Icon = "📁"
+                    IconImage = IconHelper.GetIconForPath(dir),
+                    IsDirectory = true,
+                    Modified = di.LastWriteTime,
+                    Extension = ""
                 });
             }
 
             foreach (var file in Directory.GetFiles(_folderPath))
             {
-                var ext = Path.GetExtension(file).ToLowerInvariant();
+                var fi = new FileInfo(file);
                 items.Add(new FolderItem
                 {
-                    DisplayName = Path.GetFileName(file),
+                    DisplayName = fi.Name,
                     FullPath = file,
-                    Icon = ext switch
-                    {
-                        ".txt" or ".log" or ".md" => "📄",
-                        ".jpg" or ".jpeg" or ".png" or ".gif" or ".bmp" => "🖼️",
-                        ".mp3" or ".wav" or ".flac" => "🎵",
-                        ".mp4" or ".avi" or ".mkv" => "🎬",
-                        ".exe" or ".msi" => "⚙️",
-                        ".zip" or ".rar" or ".7z" => "📦",
-                        ".pdf" => "📕",
-                        ".lnk" => "🔗",
-                        _ => "📄"
-                    }
+                    IconImage = IconHelper.GetIconForPath(file),
+                    IsDirectory = false,
+                    Size = fi.Length,
+                    Modified = fi.LastWriteTime,
+                    Extension = fi.Extension.ToLowerInvariant()
                 });
             }
         }
         catch { }
+
+        items = SortItems(items);
 
         TxtFolderName.Text = Path.GetFileName(_folderPath);
         if (string.IsNullOrEmpty(TxtFolderName.Text))
             TxtFolderName.Text = _folderPath;
 
         FileGrid.ItemsSource = items;
+    }
+
+    private List<FolderItem> SortItems(List<FolderItem> items)
+    {
+        // Directories always come first, then apply the selected sort
+        IEnumerable<FolderItem> dirs = items.Where(i => i.IsDirectory);
+        IEnumerable<FolderItem> files = items.Where(i => !i.IsDirectory);
+
+        dirs = _sortMode switch
+        {
+            SortMode.Name => _sortDescending
+                ? dirs.OrderByDescending(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
+                : dirs.OrderBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase),
+            SortMode.DateModified => _sortDescending
+                ? dirs.OrderByDescending(i => i.Modified)
+                : dirs.OrderBy(i => i.Modified),
+            _ => dirs.OrderBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
+        };
+
+        files = _sortMode switch
+        {
+            SortMode.Name => _sortDescending
+                ? files.OrderByDescending(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
+                : files.OrderBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase),
+            SortMode.DateModified => _sortDescending
+                ? files.OrderByDescending(i => i.Modified)
+                : files.OrderBy(i => i.Modified),
+            SortMode.Size => _sortDescending
+                ? files.OrderByDescending(i => i.Size)
+                : files.OrderBy(i => i.Size),
+            SortMode.Type => _sortDescending
+                ? files.OrderByDescending(i => i.Extension).ThenBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
+                : files.OrderBy(i => i.Extension).ThenBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase),
+            _ => files.OrderBy(i => i.DisplayName, StringComparer.OrdinalIgnoreCase)
+        };
+
+        return [.. dirs, .. files];
+    }
+
+    private void CmbSort_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CmbSort.SelectedIndex < 0) return;
+        _sortMode = (SortMode)CmbSort.SelectedIndex;
+        LoadFolder();
+    }
+
+    private void BtnSortDir_Click(object sender, RoutedEventArgs e)
+    {
+        _sortDescending = !_sortDescending;
+        BtnSortDir.Content = _sortDescending ? "↓" : "↑";
+        BtnSortDir.ToolTip = _sortDescending ? "Descending" : "Ascending";
+        LoadFolder();
     }
 
     private void BtnBrowse_Click(object sender, RoutedEventArgs e)
@@ -269,6 +360,12 @@ public partial class DesktopFolderWidget : Window
 
     private void FileItem_Click(object sender, RoutedEventArgs e)
     {
+        if (_didDrag)
+        {
+            _didDrag = false;
+            return;
+        }
+
         if (sender is Button btn && btn.Tag is string path)
         {
             if (Directory.Exists(path))
@@ -288,8 +385,65 @@ public partial class DesktopFolderWidget : Window
         }
     }
 
+    private void FileItem_PreviewLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string path)
+        {
+            _dragStartPoint = e.GetPosition(this);
+            _dragItemPath = path;
+            _didDrag = false;
+            _dragIsLeftButton = true;
+        }
+    }
+
+    private void FileItem_PreviewRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string path)
+        {
+            _dragStartPoint = e.GetPosition(this);
+            _dragItemPath = path;
+            _didDrag = false;
+            _dragIsLeftButton = false;
+        }
+    }
+
+    private void FileItem_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_dragItemPath is null)
+            return;
+
+        bool buttonHeld = _dragIsLeftButton
+            ? e.LeftButton == MouseButtonState.Pressed
+            : e.RightButton == MouseButtonState.Pressed;
+        if (!buttonHeld)
+            return;
+
+        var pos = e.GetPosition(this);
+        var diff = pos - _dragStartPoint;
+
+        if (Math.Abs(diff.X) > SystemParameters.MinimumHorizontalDragDistance ||
+            Math.Abs(diff.Y) > SystemParameters.MinimumVerticalDragDistance)
+        {
+            _didDrag = true;
+            var path = _dragItemPath;
+            _dragItemPath = null;
+            var data = new System.Windows.DataObject(System.Windows.DataFormats.FileDrop, new[] { path });
+            DragDrop.DoDragDrop(this, data, System.Windows.DragDropEffects.Copy | System.Windows.DragDropEffects.Move | System.Windows.DragDropEffects.Link);
+        }
+    }
+
     private void FileItem_RightClick(object sender, MouseButtonEventArgs e)
     {
+        if (_didDrag)
+        {
+            _didDrag = false;
+            _dragItemPath = null;
+            e.Handled = true;
+            return;
+        }
+
+        _dragItemPath = null;
+
         if (sender is Button btn && btn.Tag is string path)
         {
             e.Handled = true;
@@ -303,6 +457,22 @@ public partial class DesktopFolderWidget : Window
         Close();
     }
 
+    private void ReleaseResources()
+    {
+        // Clear icon image references from all items
+        if (FileGrid.ItemsSource is IList<FolderItem> items)
+        {
+            foreach (var item in items)
+                item.IconImage = null;
+        }
+        FileGrid.ItemsSource = null;
+
+        // Release the drop shadow effect (holds unmanaged render resources)
+        RootBorder.Effect = null;
+        RootBorder.Child = null;
+        Content = null;
+    }
+
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (!_isDocked && e.LeftButton == MouseButtonState.Pressed)
@@ -314,5 +484,17 @@ public class FolderItem
 {
     public string DisplayName { get; set; } = string.Empty;
     public string FullPath { get; set; } = string.Empty;
-    public string Icon { get; set; } = "📄";
+    public ImageSource? IconImage { get; set; }
+    public bool IsDirectory { get; set; }
+    public long Size { get; set; }
+    public DateTime Modified { get; set; }
+    public string Extension { get; set; } = string.Empty;
+}
+
+public enum SortMode
+{
+    Name,
+    DateModified,
+    Size,
+    Type
 }

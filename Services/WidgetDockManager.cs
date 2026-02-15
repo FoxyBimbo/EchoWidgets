@@ -42,10 +42,18 @@ public partial class WidgetDockManager
     private const uint ABE_RIGHT      = 2;
     private const uint ABE_BOTTOM     = 3;
 
-    private const int ABN_POSCHANGED  = 1;
+    private const int ABN_POSCHANGED       = 1;
+    private const int ABN_FULLSCREENAPP    = 2;
 
     private const int SM_CXSCREEN     = 0;
     private const int SM_CYSCREEN     = 1;
+
+    private const int SW_HIDE = 0;
+    private const int SW_SHOW = 5;
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     // ── Native structs ──────────────────────────────────────
 
@@ -76,9 +84,12 @@ public partial class WidgetDockManager
         public required int ThicknessPx;
         public required HwndSource Source;
         public required HwndSourceHook Hook;
+        public required Window Window;
+        public bool HiddenForFullscreen;
     }
 
     private readonly Dictionary<string, AppBarState> _bars = [];
+    private bool _allHiddenForFullscreen;
 
     // ── Public API ──────────────────────────────────────────
 
@@ -128,10 +139,20 @@ public partial class WidgetDockManager
 
         HwndSourceHook hook = (IntPtr h, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) =>
         {
-            if ((uint)msg == capturedMsg && wParam.ToInt32() == ABN_POSCHANGED)
+            if ((uint)msg == capturedMsg)
             {
-                SetAppBarPosition(capturedHwnd, capturedEdge, capturedThickness);
-                handled = true;
+                int notification = wParam.ToInt32();
+                if (notification == ABN_POSCHANGED)
+                {
+                    SetAppBarPosition(capturedHwnd, capturedEdge, capturedThickness);
+                    handled = true;
+                }
+                else if (notification == ABN_FULLSCREENAPP)
+                {
+                    bool entering = lParam != IntPtr.Zero;
+                    OnFullscreenChanged(entering);
+                    handled = true;
+                }
             }
             return IntPtr.Zero;
         };
@@ -144,7 +165,8 @@ public partial class WidgetDockManager
             Edge = edge,
             ThicknessPx = thicknessPx,
             Source = source!,
-            Hook = hook
+            Hook = hook,
+            Window = window
         };
     }
 
@@ -187,10 +209,20 @@ public partial class WidgetDockManager
 
         HwndSourceHook hook = (IntPtr h, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) =>
         {
-            if ((uint)msg == capturedMsg && wParam.ToInt32() == ABN_POSCHANGED)
+            if ((uint)msg == capturedMsg)
             {
-                SetAppBarPosition(capturedHwnd, capturedEdge, capturedThickness);
-                handled = true;
+                int notification = wParam.ToInt32();
+                if (notification == ABN_POSCHANGED)
+                {
+                    SetAppBarPosition(capturedHwnd, capturedEdge, capturedThickness);
+                    handled = true;
+                }
+                else if (notification == ABN_FULLSCREENAPP)
+                {
+                    bool entering = lParam != IntPtr.Zero;
+                    OnFullscreenChanged(entering);
+                    handled = true;
+                }
             }
             return IntPtr.Zero;
         };
@@ -208,6 +240,54 @@ public partial class WidgetDockManager
         foreach (var id in _bars.Keys.ToList())
             Undock(id);
     }
+
+    // ── Fullscreen hide/show ───────────────────────────────
+
+    /// <summary>
+    /// List of floating (non-docked) widget windows that should also
+    /// be hidden/shown when a fullscreen app is detected.
+    /// </summary>
+    private readonly List<WeakReference<Window>> _floatingWidgets = [];
+
+    public void TrackFloatingWidget(Window window)
+    {
+        _floatingWidgets.Add(new WeakReference<Window>(window));
+    }
+
+    public void UntrackFloatingWidget(Window window)
+    {
+        _floatingWidgets.RemoveAll(wr => !wr.TryGetTarget(out var w) || w == window);
+    }
+
+    private void OnFullscreenChanged(bool entering)
+    {
+        _allHiddenForFullscreen = entering;
+
+        foreach (var state in _bars.Values)
+        {
+            state.HiddenForFullscreen = entering;
+            ShowWindow(state.HWnd, entering ? SW_HIDE : SW_SHOW);
+        }
+
+        // Also hide/show floating widgets
+        _floatingWidgets.RemoveAll(wr => !wr.TryGetTarget(out _));
+        foreach (var wr in _floatingWidgets)
+        {
+            if (wr.TryGetTarget(out var w))
+            {
+                w.Dispatcher.Invoke(() =>
+                {
+                    if (entering) w.Hide();
+                    else w.Show();
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Lets external code (e.g. FullscreenWatcher) trigger hide/show.
+    /// </summary>
+    public void SetFullscreenMode(bool entering) => OnFullscreenChanged(entering);
 
     // ── AppBar positioning ──────────────────────────────────
 
