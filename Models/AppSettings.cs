@@ -14,6 +14,7 @@ public class AppSettings
     public string AccentColor { get; set; } = "#FF3A86FF";
     public List<string> PinnedAppPaths { get; set; } = [];
     public List<string> EnabledExtensions { get; set; } = [];
+    public bool HasConfiguredExtensions { get; set; }
 
     /// <summary>Theme mode: "Dark", "Light", "Auto", or "Custom".</summary>
     public string ThemeMode { get; set; } = "Auto";
@@ -63,13 +64,19 @@ public class AppSettings
         var kind = widgetId.Contains('_') ? widgetId[..widgetId.LastIndexOf('_')] : widgetId;
         return kind switch
         {
-            "DesktopFolder" => new WidgetSettings { Kind = "DesktopFolder", Topmost = false, Opacity = 1.0 },
+            "Folder" or "DesktopFolder" => new WidgetSettings { Kind = "Folder", Topmost = false, Opacity = 1.0 },
             "ShortcutPanel" => new WidgetSettings
             {
                 Kind = "ShortcutPanel",
                 Topmost = false,
                 Opacity = 1.0,
                 Custom = new() { ["Title"] = "Shortcuts" }
+            },
+            "FullScreenShell" => new WidgetSettings
+            {
+                Kind = "FullScreenShell",
+                Topmost = false,
+                Opacity = 1.0
             },
             _ => new WidgetSettings { Kind = kind }
         };

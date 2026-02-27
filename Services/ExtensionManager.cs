@@ -5,6 +5,8 @@ namespace EchoUI.Services;
 
 public class ExtensionManager
 {
+    private readonly HashSet<string> _enabledExtensions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _respectEnabledList;
     private static readonly string ExtensionsDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "EchoUI", "Extensions");
 
@@ -16,8 +18,15 @@ public class ExtensionManager
 
     public List<ExtensionInfo> Extensions { get; } = [];
 
-    public ExtensionManager()
+    public ExtensionManager(AppSettings? settings = null)
     {
+        if (settings is not null)
+        {
+            _respectEnabledList = settings.HasConfiguredExtensions;
+            foreach (var name in settings.EnabledExtensions)
+                _enabledExtensions.Add(name);
+        }
+
         Directory.CreateDirectory(PluginsDir);
         Directory.CreateDirectory(WidgetsDir);
         EnsureSampleExtensions();
@@ -29,6 +38,7 @@ public class ExtensionManager
         Extensions.Clear();
         ScanDirectory(PluginsDir, ExtensionKind.Plugin);
         ScanDirectory(WidgetsDir, ExtensionKind.Widget);
+        ApplyEnabledFlags();
     }
 
     private void ScanDirectory(string dir, ExtensionKind kind)
@@ -46,6 +56,24 @@ public class ExtensionManager
                 Description = kind == ExtensionKind.Plugin ? "Plugin script" : "Widget script"
             });
         }
+    }
+
+    public void UpdateEnabledExtensions(IEnumerable<string> enabledNames)
+    {
+        _enabledExtensions.Clear();
+        foreach (var name in enabledNames)
+            _enabledExtensions.Add(name);
+
+        ApplyEnabledFlags();
+    }
+
+    private void ApplyEnabledFlags()
+    {
+        if (!_respectEnabledList)
+            return;
+
+        foreach (var ext in Extensions)
+            ext.IsEnabled = _enabledExtensions.Contains(ext.Name);
     }
 
     public void ImportExtension(string sourcePath, ExtensionKind kind)
@@ -78,13 +106,17 @@ public class ExtensionManager
                 """);
         }
 
-        var sampleDesktopFolder = Path.Combine(WidgetsDir, "DesktopFolder.js");
-        if (!File.Exists(sampleDesktopFolder))
+        var legacyDesktopFolder = Path.Combine(WidgetsDir, "DesktopFolder.js");
+        var sampleFolder = Path.Combine(WidgetsDir, "Folder.js");
+        if (File.Exists(legacyDesktopFolder) && !File.Exists(sampleFolder))
+            File.Move(legacyDesktopFolder, sampleFolder);
+
+        if (!File.Exists(sampleFolder))
         {
-            File.WriteAllText(sampleDesktopFolder, """
-                // DesktopFolder widget – built-in, handled natively.
-                // This marker file tells EchoUI to show the Desktop Folder widget.
-                echo.notify("DesktopFolder", "Desktop folder widget is active.");
+            File.WriteAllText(sampleFolder, """
+                // Folder widget – built-in, handled natively.
+                // This marker file tells EchoUI to show the Folder widget.
+                echo.notify("Folder", "Folder widget is active.");
                 """);
         }
 
@@ -95,6 +127,16 @@ public class ExtensionManager
                 // ShortcutPanel widget – built-in, handled natively.
                 // This marker file tells EchoUI to show the Shortcut Panel widget.
                 echo.notify("ShortcutPanel", "Shortcut panel widget is active.");
+                """);
+        }
+
+        var sampleFullScreenShell = Path.Combine(WidgetsDir, "FullScreenShell.js");
+        if (!File.Exists(sampleFullScreenShell))
+        {
+            File.WriteAllText(sampleFullScreenShell, """
+                // FullScreenShell widget – built-in, handled natively.
+                // This marker file tells EchoUI to show the Full Screen Shell widget.
+                echo.notify("FullScreenShell", "Full screen shell widget is active.");
                 """);
         }
     }

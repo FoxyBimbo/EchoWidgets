@@ -7,13 +7,26 @@ namespace EchoUI.Models;
 public class WidgetSettings
 {
     /// <summary>Widget kind — used to create the correct window type.</summary>
-    public string Kind { get; set; } = "DesktopFolder";
+    public string Kind { get; set; } = "Folder";
 
     /// <summary>Window opacity (0.0 – 1.0).</summary>
     public double Opacity { get; set; } = 1.0;
 
     /// <summary>Whether the widget stays on top of other applications.</summary>
     public bool Topmost { get; set; } = true;
+
+    /// <summary>Whether the widget should be reopened on app start.</summary>
+    public bool IsOpen { get; set; }
+
+    /// <summary>Last known screen position and size.</summary>
+    public double? Left { get; set; }
+    public double? Top { get; set; }
+    public double? Width { get; set; }
+    public double? Height { get; set; }
+
+    /// <summary>Last known docked edge and thickness.</summary>
+    public DockEdge DockEdge { get; set; } = DockEdge.None;
+    public double? DockThickness { get; set; }
 
     /// <summary>Widget-specific key/value settings.</summary>
     public Dictionary<string, string> Custom { get; set; } = [];
@@ -29,4 +42,13 @@ public class WidgetSettings
     /// uses these colors instead of the global theme.
     /// </summary>
     public ThemeColors? CustomColors { get; set; }
+
+    /// <summary>Last active folder for folder widgets.</summary>
+    public string? ActiveFolder { get; set; }
+
+    /// <summary>Whether a folder widget is minimized.</summary>
+    public bool IsMinimized { get; set; }
+
+    /// <summary>Expanded height for minimized widgets.</summary>
+    public double? ExpandedHeight { get; set; }
 }

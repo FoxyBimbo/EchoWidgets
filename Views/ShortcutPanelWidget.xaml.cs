@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using EchoUI.Models;
 using EchoUI.Services;
 using ContextMenu = System.Windows.Controls.ContextMenu;
@@ -14,17 +16,32 @@ namespace EchoUI.Views;
 
 public partial class ShortcutPanelWidget : Window
 {
+    private const string MinimizedKey = "IsMinimized";
+    private const string LegacyCollapsedKey = "IsCollapsed";
+    private const string ExpandedHeightKey = "ExpandedHeight";
     private readonly string _widgetId;
     private readonly WidgetSettings _widgetSettings;
     private readonly AppSettings _appSettings;
-    private bool _isCollapsed;
+    private bool _isMinimized;
+    private double _expandedHeight;
     private bool _titleDragging;
     private System.Windows.Point _titleDragStart;
     private bool _isDocked;
     private DockEdge _currentEdge = DockEdge.None;
     private const int AutoDockThreshold = 2;
+    private bool _defaultTopmost;
+    private readonly DispatcherTimer _minimizeTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     public string WidgetId => _widgetId;
+    public void RestoreDock(DockEdge edge, double thickness)
+    {
+        if (edge == DockEdge.None)
+            return;
+
+        DockTo(edge);
+        if (thickness > 0)
+            MainWindow.DockManager.Resize(WidgetId, MainWindow.DockManager.DipToPixel(thickness));
+    }
 
     public ShortcutPanelWidget(string widgetId, WidgetSettings settings, AppSettings appSettings)
     {
@@ -32,8 +49,10 @@ public partial class ShortcutPanelWidget : Window
         _widgetId = widgetId;
         _widgetSettings = settings;
         _appSettings = appSettings;
+        _minimizeTimer.Tick += MinimizeTimer_Tick;
 
         ApplyWidgetSettingsFromModel();
+        Loaded += (_, _) => ApplySavedMinimizeState();
 
         Closed += (_, _) => ReleaseResources();
     }
@@ -56,18 +75,71 @@ public partial class ShortcutPanelWidget : Window
         var ws = SyncWidgetSettings();
         ThemeHelper.ApplyToElement(this, ws.CustomColors);
         Topmost = ws.Topmost;
+        _defaultTopmost = ws.Topmost;
         Opacity = ws.Opacity;
 
         ws.Custom.TryGetValue("Title", out var title);
         TxtTitle.Text = string.IsNullOrEmpty(title) ? "Shortcuts" : title;
+
+        _isMinimized = ws.IsMinimized;
+        if (!_isMinimized
+            && ws.Custom.TryGetValue(MinimizedKey, out var minimizedValue)
+            && bool.TryParse(minimizedValue, out var minimized))
+            _isMinimized = minimized;
+        if (!_isMinimized
+            && ws.Custom.TryGetValue(LegacyCollapsedKey, out var collapsedValue)
+            && bool.TryParse(collapsedValue, out var collapsed))
+            _isMinimized = collapsed;
+        ws.Custom.Remove(LegacyCollapsedKey);
+
+        _expandedHeight = ws.ExpandedHeight ?? 0;
+        if (ws.Custom.TryGetValue(ExpandedHeightKey, out var expandedValue)
+            && double.TryParse(expandedValue, out var expandedHeight))
+            _expandedHeight = expandedHeight;
+
+        BtnMinimize.Content = _isMinimized ? "▢" : "—";
+        BtnMinimize.ToolTip = _isMinimized ? "Restore" : "Minimize";
         LoadShortcuts();
+    }
+
+    private void ApplySavedMinimizeState()
+    {
+        if (_isMinimized)
+            CollapseToMinimize();
     }
 
     private void Window_SourceInitialized(object sender, EventArgs e)
     {
+        var ws = SyncWidgetSettings();
+        if (ws.Left.HasValue && ws.Top.HasValue)
+        {
+            Left = ws.Left.Value;
+            Top = ws.Top.Value;
+            return;
+        }
         var screen = System.Windows.Forms.Screen.PrimaryScreen!.WorkingArea;
         Left = (screen.Width - Width) / 2;
         Top = (screen.Height - Height) / 2;
+    }
+
+    private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        Topmost = true;
+        if (!_isMinimized)
+            return;
+
+        _minimizeTimer.Stop();
+        ExpandFromMinimize();
+    }
+
+    private void Window_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        Topmost = _defaultTopmost;
+        if (!_isMinimized)
+            return;
+
+        _minimizeTimer.Stop();
+        _minimizeTimer.Start();
     }
 
     // ── Load / Refresh ──────────────────────────────────────
@@ -137,23 +209,57 @@ public partial class ShortcutPanelWidget : Window
         {
             _titleDragging = false;
             TryAutoDockFromPosition();
-            return;
+            e.Handled = true;
         }
+    }
 
-        // Simple click+release → toggle collapse/expand
-        _isCollapsed = !_isCollapsed;
-        ContentPanel.Visibility = _isCollapsed ? Visibility.Collapsed : Visibility.Visible;
+    private void CollapseToMinimize()
+    {
+        ContentPanel.Visibility = Visibility.Collapsed;
+        UpdateLayout();
+        Height = GetMinimizedHeight();
+    }
 
-        if (_isCollapsed)
+    private void ExpandFromMinimize()
+    {
+        ContentPanel.Visibility = Visibility.Visible;
+        Height = _expandedHeight > 0 ? _expandedHeight : 320;
+    }
+
+    private double GetMinimizedHeight()
+    {
+        HeaderPanel.UpdateLayout();
+        var headerHeight = HeaderPanel.ActualHeight;
+        var rootMargin = RootBorder.Margin.Top + RootBorder.Margin.Bottom;
+        var innerMargin = InnerLayout.Margin.Top + InnerLayout.Margin.Bottom;
+        var border = RootBorder.BorderThickness.Top + RootBorder.BorderThickness.Bottom;
+        return Math.Max(0, headerHeight + rootMargin + innerMargin + border);
+    }
+
+    private void BtnMinimize_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isMinimized)
         {
-            SizeToContent = SizeToContent.Height;
-            MinHeight = 0;
+            _isMinimized = false;
+            ExpandFromMinimize();
         }
         else
         {
-            SizeToContent = SizeToContent.Manual;
-            Height = 320;
+            _expandedHeight = Height;
+            _isMinimized = true;
+            CollapseToMinimize();
         }
+
+        BtnMinimize.Content = _isMinimized ? "▢" : "—";
+        BtnMinimize.ToolTip = _isMinimized ? "Restore" : "Minimize";
+        PersistShortcutState();
+    }
+
+    private void MinimizeTimer_Tick(object? sender, EventArgs e)
+    {
+        _minimizeTimer.Stop();
+        if (_isMinimized && !IsMouseOver)
+            CollapseToMinimize();
     }
 
     // ── Title editing ───────────────────────────────────────
@@ -164,6 +270,7 @@ public partial class ShortcutPanelWidget : Window
         {
             TxtTitle.Text = newTitle;
             _widgetSettings.Custom["Title"] = newTitle;
+            PersistShortcutState();
         }
         TitleEditPanel.Visibility = Visibility.Collapsed;
     }
@@ -176,6 +283,7 @@ public partial class ShortcutPanelWidget : Window
         {
             _widgetSettings.Shortcuts.Add(dlg.Result);
             LoadShortcuts();
+            PersistShortcutState();
         }
     }
 
@@ -247,10 +355,6 @@ public partial class ShortcutPanelWidget : Window
 
     private void HighlightActiveEdge(DockEdge edge)
     {
-        BtnDockLeft.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Left ? "AccentBrush" : "ControlBackgroundBrush");
-        BtnDockRight.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Right ? "AccentBrush" : "ControlBackgroundBrush");
-        BtnDockTop.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Top ? "AccentBrush" : "ControlBackgroundBrush");
-        BtnDockBottom.SetResourceReference(Button.BackgroundProperty, edge == DockEdge.Bottom ? "AccentBrush" : "ControlBackgroundBrush");
     }
 
     private DockEdge GetAutoDockEdgeFromCursor()
@@ -332,7 +436,10 @@ public partial class ShortcutPanelWidget : Window
         {
             var dlg = new ShortcutEditDialog(shortcut) { Owner = this };
             if (dlg.ShowDialog() == true)
+            {
                 LoadShortcuts();
+                PersistShortcutState();
+            }
         };
         menu.Items.Add(edit);
 
@@ -341,6 +448,7 @@ public partial class ShortcutPanelWidget : Window
         {
             _widgetSettings.Shortcuts.Remove(shortcut);
             LoadShortcuts();
+            PersistShortcutState();
         };
         menu.Items.Add(del);
 
@@ -372,6 +480,29 @@ public partial class ShortcutPanelWidget : Window
         RootBorder.Effect = null;
         RootBorder.Child = null;
         Content = null;
+    }
+
+    private void PersistShortcutState()
+    {
+        var ws = _appSettings.GetWidgetSettings(_widgetId);
+        ws.Custom["Title"] = TxtTitle.Text;
+        ws.Custom.Remove(LegacyCollapsedKey);
+        ws.Custom.Remove(MinimizedKey);
+        ws.IsMinimized = _isMinimized;
+        _widgetSettings.IsMinimized = _isMinimized;
+        if (_expandedHeight > 0)
+        {
+            ws.Custom[ExpandedHeightKey] = _expandedHeight.ToString(CultureInfo.InvariantCulture);
+            ws.ExpandedHeight = _expandedHeight;
+            _widgetSettings.ExpandedHeight = _expandedHeight;
+        }
+        else
+        {
+            ws.Custom.Remove(ExpandedHeightKey);
+            ws.ExpandedHeight = null;
+            _widgetSettings.ExpandedHeight = null;
+        }
+        _appSettings.Save();
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

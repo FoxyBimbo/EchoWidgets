@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows;
@@ -8,20 +9,26 @@ using EchoUI.Services;
 using EchoUI.Views;
 using Application = System.Windows.Application;
 using Color = System.Windows.Media.Color;
+using Screen = System.Windows.Forms.Screen;
 
 namespace EchoUI;
 
 public partial class MainWindow : Window
 {
+    private const bool EnableStateDiagnostics = true;
     private readonly AppSettings _settings;
     private readonly ExtensionManager _extManager;
     private readonly ScriptEngine _scriptEngine;
     private readonly ObservableCollection<AppNotification> _notifications = [];
     private readonly System.Windows.Forms.NotifyIcon _trayIcon;
     private readonly FullscreenWatcher _fullscreenWatcher;
+    private readonly DispatcherTimer _settingsSaveTimer;
+    private bool _widgetsRestored;
+    private bool _isRestoringWidgetsState;
 
     /// <summary>All open widget windows keyed by their unique instance ID.</summary>
     private readonly Dictionary<string, Window> _widgets = [];
+    private bool _isShuttingDown;
 
     public static WidgetDockManager DockManager { get; } = new();
 
@@ -30,7 +37,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _settings = AppSettings.Load();
-        _extManager = new ExtensionManager();
+        _extManager = new ExtensionManager(_settings);
         _scriptEngine = new ScriptEngine();
 
         var api = new TaskbarScriptApi(AddNotification, (_, _) => { });
@@ -44,6 +51,14 @@ public partial class MainWindow : Window
             Dispatcher.Invoke(() => DockManager.SetFullscreenMode(false));
         _fullscreenWatcher.Start();
 
+        _settingsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _settingsSaveTimer.Tick += (_, _) =>
+        {
+            _settingsSaveTimer.Stop();
+            if (!_isShuttingDown)
+                _settings.Save();
+        };
+
         // ── System tray icon ────────────────────────────────
         _trayIcon = new System.Windows.Forms.NotifyIcon
         {
@@ -52,23 +67,49 @@ public partial class MainWindow : Window
             Visible = true
         };
 
-        var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("New Desktop Folder Widget", null, (_, _) => SpawnWidget("DesktopFolder"));
-        menu.Items.Add("New Shortcut Panel Widget", null, (_, _) => SpawnWidget("ShortcutPanel"));
-        menu.Items.Add("Run Plugins", null, (_, _) => RunPlugins());
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Notifications", null, (_, _) => ShowNotifications());
-        menu.Items.Add("Settings", null, (_, _) => OpenSettings());
-        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitApp());
-        _trayIcon.ContextMenuStrip = menu;
+        RefreshTrayMenu();
         _trayIcon.DoubleClick += (_, _) => OpenSettings();
 
+        Application.Current.Dispatcher.ShutdownStarted += (_, _) =>
+        {
+            if (_isShuttingDown)
+                return;
+
+            _isShuttingDown = true;
+            PersistOpenWidgets();
+            _settings.Save();
+        };
+
+        Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
+        SourceInitialized += (_, _) => EnsureWidgetsRestored();
+        Dispatcher.BeginInvoke(EnsureWidgetsRestored, DispatcherPriority.Loaded);
+    }
+
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_isShuttingDown)
+            return;
+
+        _isShuttingDown = true;
+        PersistOpenWidgets();
+        _settings.Save();
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        EnsureWidgetsRestored();
+    }
+
+    private void EnsureWidgetsRestored()
+    {
+        if (_widgetsRestored)
+            return;
+
+        _widgetsRestored = true;
+        _isRestoringWidgetsState = true;
+        RestoreOpenWidgets();
+        _isRestoringWidgetsState = false;
         Hide();
     }
 
@@ -83,28 +124,172 @@ public partial class MainWindow : Window
 
     // ── Widget management ───────────────────────────────────
 
+    private static string NormalizeWidgetKind(string kind) =>
+        kind == "DesktopFolder" ? "Folder" : kind;
+
     private void SpawnWidget(string kind)
     {
-        var (id, ws) = _settings.CreateWidgetInstance(kind);
+        var normalizedKind = NormalizeWidgetKind(kind);
+        var (id, ws) = _settings.CreateWidgetInstance(normalizedKind);
+        ws.IsOpen = true;
+        OpenWidget(id, ws);
+        _settings.Save();
+    }
 
-        Window widget = kind switch
+    private void RestoreOpenWidgets()
+    {
+        foreach (var (id, ws) in _settings.Widgets.Where(pair => pair.Value.IsOpen).ToList())
+            OpenWidget(id, ws);
+    }
+
+    private void OpenWidget(string id, WidgetSettings ws)
+    {
+        var normalizedKind = NormalizeWidgetKind(ws.Kind);
+        Window widget = normalizedKind switch
         {
             "ShortcutPanel" => new ShortcutPanelWidget(id, ws, _settings),
+            "FullScreenShell" => new FullScreenShellWidget(id, ws, _settings),
+            "Folder" => new DesktopFolderWidget(id, ws, _settings),
             _ => new DesktopFolderWidget(id, ws, _settings)
         };
 
-        _widgets[id] = widget;
-        widget.Closed += OnWidgetClosed;
-        DockManager.TrackFloatingWidget(widget);
+        RegisterWidget(id, widget);
+        ApplyWidgetPlacement(id, ws, widget);
         widget.Show();
 
-        if (kind == "DesktopFolder")
+        if (normalizedKind == "Folder")
         {
             foreach (var ext in _extManager.GetWidgets())
             {
                 var code = _extManager.ReadScript(ext);
                 _scriptEngine.Run(code, ext.ScriptType);
             }
+        }
+    }
+
+    private void UpdateWidgetPlacement(string id, Window win)
+    {
+        var ws = _settings.GetWidgetSettings(id);
+        ws.IsOpen = true;
+
+        var edge = DockManager.GetEdge(id);
+        ws.DockEdge = edge;
+
+        var width = win.Width;
+        var height = win.Height;
+        if (win is DesktopFolderWidget folderWidget)
+        {
+            height = folderWidget.GetPersistedHeight();
+            var activeFolder = folderWidget.ActiveFolderPath;
+            if (!string.IsNullOrWhiteSpace(activeFolder))
+            {
+                ws.ActiveFolder = activeFolder;
+                ws.Custom["DefaultFolder"] = activeFolder;
+                ws.Custom.Remove("ActiveFolder");
+            }
+            if (folderWidget.IsMinimizeStateInitialized)
+                ws.IsMinimized = folderWidget.IsWidgetMinimized;
+            ws.Custom.Remove("IsMinimized");
+
+            if (EnableStateDiagnostics)
+                Debug.WriteLine($"[MainWindow:{id}] UpdateWidgetPlacement ActiveFolder='{ws.ActiveFolder}', IsMinimized={ws.IsMinimized}, WidgetMin={folderWidget.IsWidgetMinimized}, Initialized={folderWidget.IsMinimizeStateInitialized}");
+        }
+
+        ws.Width = width;
+        ws.Height = height;
+        ws.Left = win.Left;
+        ws.Top = win.Top;
+
+        if (edge != DockEdge.None)
+        {
+            var thickness = edge is DockEdge.Left or DockEdge.Right
+                ? (win.ActualWidth > 0 ? win.ActualWidth : width)
+                : (win.ActualHeight > 0 ? win.ActualHeight : height);
+            ws.DockThickness = thickness;
+        }
+        else
+        {
+            ws.DockThickness = null;
+        }
+
+        ScheduleSettingsSave();
+    }
+
+    private void ScheduleSettingsSave()
+    {
+        if (_isShuttingDown || _isRestoringWidgetsState)
+            return;
+
+        _settingsSaveTimer.Stop();
+        _settingsSaveTimer.Start();
+    }
+
+    private void RegisterWidget(string id, Window widget)
+    {
+        _widgets[id] = widget;
+        widget.Closed += OnWidgetClosed;
+        widget.LocationChanged += (_, _) => UpdateWidgetPlacement(id, widget);
+        widget.SizeChanged += (_, _) => UpdateWidgetPlacement(id, widget);
+        DockManager.TrackFloatingWidget(widget);
+    }
+
+    private void ApplyWidgetPlacement(string id, WidgetSettings ws, Window widget)
+    {
+        if (ws.Width is > 0)
+            widget.Width = ws.Width.Value;
+        if (ws.Height is > 0)
+            widget.Height = ws.Height.Value;
+
+        if (ws.Left.HasValue && ws.Top.HasValue)
+        {
+            widget.WindowStartupLocation = WindowStartupLocation.Manual;
+            widget.Left = ws.Left.Value;
+            widget.Top = ws.Top.Value;
+            EnsureWidgetOnScreen(widget);
+        }
+
+        widget.SourceInitialized += (_, _) =>
+        {
+            if (ws.DockEdge == DockEdge.None)
+                return;
+
+            var thickness = ws.DockThickness ?? (ws.DockEdge is DockEdge.Left or DockEdge.Right
+                ? widget.Width
+                : widget.Height);
+            switch (widget)
+            {
+                case DesktopFolderWidget folderWidget:
+                    folderWidget.RestoreDock(ws.DockEdge, thickness);
+                    break;
+                case ShortcutPanelWidget shortcutWidget:
+                    shortcutWidget.RestoreDock(ws.DockEdge, thickness);
+                    break;
+                default:
+                    DockManager.Dock(id, widget, ws.DockEdge, thickness);
+                    break;
+            }
+        };
+    }
+
+    private static void EnsureWidgetOnScreen(Window widget)
+    {
+        if (double.IsNaN(widget.Width) || double.IsNaN(widget.Height))
+            return;
+
+        var rect = new Rectangle(
+            (int)Math.Round(widget.Left),
+            (int)Math.Round(widget.Top),
+            (int)Math.Round(widget.Width),
+            (int)Math.Round(widget.Height));
+
+        bool intersects = Screen.AllScreens
+            .Any(screen => rect.IntersectsWith(screen.WorkingArea));
+
+        if (!intersects)
+        {
+            var screen = Screen.PrimaryScreen!.WorkingArea;
+            widget.Left = screen.Left + (screen.Width - widget.Width) / 2;
+            widget.Top = screen.Top + (screen.Height - widget.Height) / 2;
         }
     }
 
@@ -116,26 +301,57 @@ public partial class MainWindow : Window
         {
             DesktopFolderWidget dfw => dfw.WidgetId,
             ShortcutPanelWidget spw => spw.WidgetId,
+            FullScreenShellWidget fsw => fsw.WidgetId,
             _ => null
         };
         if (id is null) return;
+
+        var isAppClosing = _isShuttingDown || Application.Current.Dispatcher.HasShutdownStarted;
+
+        if (win is DesktopFolderWidget folderWidget)
+            folderWidget.PersistState();
+
+        if (isAppClosing)
+        {
+            UpdateWidgetPlacement(id, win);
+            _settings.GetWidgetSettings(id).IsOpen = false;
+        }
+        else
+        {
+            _settings.RemoveWidgetInstance(id);
+        }
 
         DockManager.Undock(id);
         DockManager.UntrackFloatingWidget(win);
         win.Closed -= OnWidgetClosed;
         _widgets.Remove(id);
 
-        // Save shortcut panel state before removing the settings reference
-        if (sender is ShortcutPanelWidget)
-            _settings.Save();
+        _settings.Save();
 
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         GC.WaitForPendingFinalizers();
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
     }
 
+    private void PersistOpenWidgets()
+    {
+        foreach (var (id, win) in _widgets)
+        {
+            if (win is DesktopFolderWidget folderWidget)
+            {
+                folderWidget.PersistState();
+                var ws = _settings.GetWidgetSettings(id);
+                ws.IsMinimized = folderWidget.IsWidgetMinimized;
+            }
+            UpdateWidgetPlacement(id, win);
+            _settings.GetWidgetSettings(id).IsOpen = true;
+        }
+    }
+
     private void CloseAllWidgets()
     {
+        _isShuttingDown = true;
+        PersistOpenWidgets();
         foreach (var (id, win) in _widgets.ToList())
         {
             DockManager.Undock(id);
@@ -191,11 +407,36 @@ public partial class MainWindow : Window
     // ── Settings ────────────────────────────────────────────
     private void OpenSettings()
     {
-        var win = new SettingsWindow(_settings, _extManager);
+        var win = new SettingsWindow(_settings, _extManager, spawnWidget: SpawnWidget, settingsApplied: RefreshTrayMenu);
         if (win.ShowDialog() == true)
         {
             ApplyWidgetSettings();
         }
+    }
+
+    public void OpenSettingsFromWidget()
+    {
+        OpenSettings();
+    }
+
+    private void RefreshTrayMenu()
+    {
+        var menu = new System.Windows.Forms.ContextMenuStrip();
+
+        foreach (var widget in _extManager.GetWidgets())
+            menu.Items.Add($"New {widget.Name} Widget", null, (_, _) => SpawnWidget(widget.Name));
+
+        if (menu.Items.Count > 0)
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        menu.Items.Add("Run Plugins", null, (_, _) => RunPlugins());
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add("Notifications", null, (_, _) => ShowNotifications());
+        menu.Items.Add("Settings", null, (_, _) => OpenSettings());
+        menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        menu.Items.Add("Exit", null, (_, _) => ExitApp());
+
+        _trayIcon.ContextMenuStrip = menu;
     }
 
     private void ApplyWidgetSettings()
@@ -212,6 +453,8 @@ public partial class MainWindow : Window
     // ── Exit ────────────────────────────────────────────────
     private void ExitApp()
     {
+        if (!_isShuttingDown)
+            CloseAllWidgets();
         DockManager.RestoreAll();
         Application.Current.Shutdown();
     }

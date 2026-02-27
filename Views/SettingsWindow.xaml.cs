@@ -6,6 +6,7 @@ using EchoUI.Models;
 using EchoUI.Services;
 using ColorDialog = System.Windows.Forms.ColorDialog;
 using OpenFileDialog = Microsoft.Win32.OpenFileDialog;
+using Button = System.Windows.Controls.Button;
 
 namespace EchoUI.Views;
 
@@ -16,16 +17,21 @@ public partial class SettingsWindow : Window
     private readonly string? _widgetIdOverride;
     private readonly WidgetSettings? _widgetSettingsOverride;
     private readonly Action? _widgetSettingsApplied;
+    private readonly Action<string>? _spawnWidget;
+    private readonly Action? _settingsApplied;
     private bool _loading = true;
 
     public SettingsWindow(AppSettings settings, ExtensionManager? extManager, string? widgetIdOverride = null,
-        WidgetSettings? widgetSettingsOverride = null, Action? widgetSettingsApplied = null)
+        WidgetSettings? widgetSettingsOverride = null, Action? widgetSettingsApplied = null,
+        Action<string>? spawnWidget = null, Action? settingsApplied = null)
     {
         _settings = settings;
         _extManager = extManager;
         _widgetIdOverride = widgetIdOverride;
         _widgetSettingsOverride = widgetSettingsOverride;
         _widgetSettingsApplied = widgetSettingsApplied;
+        _spawnWidget = spawnWidget;
+        _settingsApplied = settingsApplied;
         InitializeComponent();
         LoadSettings();
     }
@@ -48,13 +54,14 @@ public partial class SettingsWindow : Window
         LoadCustomThemeFields();
 
         ConfigureSectionVisibility();
+        LoadWidgetTypes();
         if (_widgetIdOverride is not null)
         {
             LoadWidgetSettings(_widgetIdOverride);
         }
         else
         {
-            LoadWidgetSettings("DesktopFolder");
+            LoadWidgetSettings("Folder");
         }
         _loading = false;
     }
@@ -68,6 +75,7 @@ public partial class SettingsWindow : Window
             PanelExtensions.Visibility = Visibility.Collapsed;
             PanelWidgetSettings.Visibility = Visibility.Visible;
             PanelWidgetSelector.Visibility = Visibility.Collapsed;
+            PanelAddWidgets.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -75,6 +83,21 @@ public partial class SettingsWindow : Window
         PanelThemeSettings.Visibility = Visibility.Visible;
         PanelGeneralSettings.Visibility = Visibility.Visible;
         PanelExtensions.Visibility = _extManager is null ? Visibility.Collapsed : Visibility.Visible;
+        PanelAddWidgets.Visibility = _extManager is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void LoadWidgetTypes()
+    {
+        if (_extManager is null)
+        {
+            LstWidgetTypes.ItemsSource = null;
+            return;
+        }
+
+        LstWidgetTypes.ItemsSource = _extManager.Extensions
+            .Where(e => e.Kind == ExtensionKind.Widget && e.IsEnabled)
+            .OrderBy(e => e.Name)
+            .ToList();
     }
 
     // ── Theme mode ──────────────────────────────────────────
@@ -178,6 +201,33 @@ public partial class SettingsWindow : Window
         UpdateSwatches();
     }
 
+    private void BtnPickColor_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is System.Windows.Controls.TextBox txt)
+        {
+            if (PickColorForTextBox(txt))
+                UpdateSwatches();
+        }
+    }
+
+    private static bool PickColorForTextBox(System.Windows.Controls.TextBox txt)
+    {
+        var dlg = new ColorDialog { FullOpen = true };
+        try
+        {
+            var c = ThemeHelper.ParseColor(txt.Text.Trim());
+            dlg.Color = System.Drawing.Color.FromArgb(c.A, c.R, c.G, c.B);
+        }
+        catch { }
+
+        if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+            return false;
+
+        var sc = dlg.Color;
+        txt.Text = $"#{sc.A:X2}{sc.R:X2}{sc.G:X2}{sc.B:X2}";
+        return true;
+    }
+
     // ── Extension import ────────────────────────────────────
     private void BtnImportPlugin_Click(object sender, RoutedEventArgs e) => ImportExtension(ExtensionKind.Plugin);
     private void BtnImportWidget_Click(object sender, RoutedEventArgs e) => ImportExtension(ExtensionKind.Widget);
@@ -210,9 +260,12 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
+    private static string NormalizeWidgetKind(string kind) =>
+        kind == "DesktopFolder" ? "Folder" : kind;
+
     // ── Widget settings ─────────────────────────────────────
     private string SelectedWidgetId =>
-        CmbWidgetSelect.SelectedItem is ComboBoxItem item && item.Tag is string id ? id : "DesktopFolder";
+        CmbWidgetSelect.SelectedItem is ComboBoxItem item && item.Tag is string id ? id : "Folder";
 
     private void CmbWidgetSelect_Changed(object sender, SelectionChangedEventArgs e)
     {
@@ -236,9 +289,10 @@ public partial class SettingsWindow : Window
 
         // Widget-type-specific panels
         var kind = widgetId.Contains('_') ? widgetId[..widgetId.LastIndexOf('_')] : widgetId;
-        PanelDesktopFolderSettings.Visibility = kind == "DesktopFolder" ? Visibility.Visible : Visibility.Collapsed;
+        kind = NormalizeWidgetKind(kind);
+        PanelDesktopFolderSettings.Visibility = kind == "Folder" ? Visibility.Visible : Visibility.Collapsed;
 
-        if (kind == "DesktopFolder")
+        if (kind == "Folder")
         {
             ws.Custom.TryGetValue("DefaultSort", out var sort);
             CmbDefaultSort.SelectedIndex = sort switch
@@ -311,12 +365,13 @@ public partial class SettingsWindow : Window
         var widgetId = SelectedWidgetId;
         var ws = ResolveWidgetSettings(widgetId);
         var kind = widgetId.Contains('_') ? widgetId[..widgetId.LastIndexOf('_')] : widgetId;
+        kind = NormalizeWidgetKind(kind);
 
         ws.Opacity = SliderOpacity.Value;
         ws.Topmost = ChkTopmost.IsChecked == true;
         ws.CustomColors = ReadWidgetColorFields();
 
-        if (kind == "DesktopFolder")
+        if (kind == "Folder")
         {
             ws.Custom["DefaultSort"] = CmbDefaultSort.SelectedIndex switch
             {
@@ -333,6 +388,12 @@ public partial class SettingsWindow : Window
 
         if (_widgetSettingsOverride is not null && _widgetIdOverride is not null)
             _settings.Widgets[_widgetIdOverride] = ws;
+    }
+
+    private void BtnAddWidget_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string widgetType)
+            _spawnWidget?.Invoke(widgetType);
     }
 
     private WidgetSettings ResolveWidgetSettings(string widgetId) =>
@@ -362,6 +423,17 @@ public partial class SettingsWindow : Window
 
             if (SelectedThemeMode == "Custom")
                 _settings.CustomTheme = ReadCustomThemeFields();
+
+            if (_extManager is not null)
+            {
+                _settings.HasConfiguredExtensions = true;
+                _settings.EnabledExtensions = _extManager.Extensions
+                    .Where(e => e.IsEnabled)
+                    .Select(e => e.Name)
+                    .ToList();
+                _extManager.UpdateEnabledExtensions(_settings.EnabledExtensions);
+                LoadWidgetTypes();
+            }
         }
 
         if (isWidgetSettings)
@@ -377,6 +449,8 @@ public partial class SettingsWindow : Window
 
         _settings.Save();
         _widgetSettingsApplied?.Invoke();
+        if (!isWidgetSettings)
+            _settingsApplied?.Invoke();
     }
 
     private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();

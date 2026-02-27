@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Threading;
 
 namespace EchoUI.Services;
@@ -28,6 +29,9 @@ public partial class FullscreenWatcher : IDisposable
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll", EntryPoint = "GetClassNameW", SetLastError = true)]
+    private static extern int GetClassNameW(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
     private const int SM_CXSCREEN = 0;
     private const int SM_CYSCREEN = 1;
@@ -86,6 +90,14 @@ public partial class FullscreenWatcher : IDisposable
         var hwnd = GetForegroundWindow();
         if (hwnd == IntPtr.Zero) return false;
         if (!IsWindowVisible(hwnd)) return false;
+
+        var classNameBuffer = new StringBuilder(256);
+        if (GetClassNameW(hwnd, classNameBuffer, classNameBuffer.Capacity) > 0)
+        {
+            var className = classNameBuffer.ToString();
+            if (className is "Progman" or "WorkerW" or "Shell_TrayWnd")
+                return false;
+        }
 
         // Ignore our own process
         GetWindowThreadProcessId(hwnd, out uint pid);
