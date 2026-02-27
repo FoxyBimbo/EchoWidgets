@@ -26,14 +26,14 @@
                     <Button Content="✕" Click="BtnClose_Click" DockPanel.Dock="Right"
                             Background="Transparent" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="Transparent"
                             FontSize="14" Padding="4,0" Cursor="Hand" MinWidth="24"/>
+                    <Button x:Name="BtnMinimize" Content="—" Click="BtnMinimize_Click" DockPanel.Dock="Right"
+                            Background="Transparent" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="Transparent"
+                            FontSize="14" Padding="4,0" Cursor="Hand" MinWidth="24"
+                            ToolTip="Minimize"/>
                     <Button Content="⚙" Click="BtnSettings_Click" DockPanel.Dock="Right"
                             Background="Transparent" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="Transparent"
                             FontSize="14" Padding="4,0" Cursor="Hand" MinWidth="24"
                             ToolTip="Settings"/>
-                    <Button Content="–" Click="BtnMinimize_Click" DockPanel.Dock="Right"
-                            Background="Transparent" Foreground="{DynamicResource MutedForegroundBrush}" BorderBrush="Transparent"
-                            FontSize="14" Padding="4,0" Cursor="Hand" MinWidth="24"
-                            ToolTip="Minimize"/>
                     <TextBlock x:Name="TxtFolderName" Text="Desktop" FontSize="16"
                                FontWeight="Bold" Foreground="{DynamicResource ForegroundBrush}" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"/>

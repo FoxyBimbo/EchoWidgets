@@ -19,12 +19,12 @@ namespace EchoUI.Views;
 public partial class DesktopFolderWidget : Window
 {
     private const bool EnableStateDiagnostics = true;
-    private const string FolderKey = "DefaultFolder";
-    private const string ActiveFolderKey = "ActiveFolder";
+    private const string LegacyFolderKey = "DefaultFolder";
+    private const string LegacyActiveFolderKey = "ActiveFolder";
     private const string SortKey = "DefaultSort";
     private const string SortDescendingKey = "SortDescending";
     private const string MinimizedKey = "IsMinimized";
-    private const string ExpandedHeightKey = "ExpandedHeight";
+    private const string LegacyExpandedHeightKey = "ExpandedHeight";
     private readonly string _widgetId;
     private string _folderPath;
     private DockEdge _currentEdge = DockEdge.None;
@@ -103,6 +103,7 @@ public partial class DesktopFolderWidget : Window
     private void ApplyWidgetSettingsFromModel()
     {
         var ws = SyncWidgetSettings();
+        var previousMinimized = _isMinimized;
         ThemeHelper.ApplyToElement(this, ws.CustomColors);
         Topmost = ws.Topmost;
         _defaultTopmost = ws.Topmost;
@@ -111,8 +112,8 @@ public partial class DesktopFolderWidget : Window
         var activeFolder = ws.ActiveFolder;
         if (string.IsNullOrEmpty(activeFolder))
         {
-            if (!ws.Custom.TryGetValue(ActiveFolderKey, out activeFolder) || string.IsNullOrEmpty(activeFolder))
-                ws.Custom.TryGetValue(FolderKey, out activeFolder);
+            if (!ws.Custom.TryGetValue(LegacyActiveFolderKey, out activeFolder) || string.IsNullOrEmpty(activeFolder))
+                ws.Custom.TryGetValue(LegacyFolderKey, out activeFolder);
         }
 
         _folderPath = !string.IsNullOrWhiteSpace(activeFolder)
@@ -134,16 +135,22 @@ public partial class DesktopFolderWidget : Window
         if (ws.Custom.TryGetValue(SortDescendingKey, out var sortDescendingValue)
             && bool.TryParse(sortDescendingValue, out var sortDescending))
             _sortDescending = sortDescending;
-        if (!_hasLoadedMinimizeMode)
-        {
-            _isMinimized = ws.IsMinimized;
-            _hasLoadedMinimizeMode = true;
-        }
+        _isMinimized = ws.IsMinimized;
+        _hasLoadedMinimizeMode = true;
         ws.Custom.Remove(MinimizedKey);
         _expandedHeight = ws.ExpandedHeight ?? 0;
-        if (ws.Custom.TryGetValue(ExpandedHeightKey, out var expandedValue)
+        if (ws.Custom.TryGetValue(LegacyExpandedHeightKey, out var expandedValue)
             && double.TryParse(expandedValue, out var expandedHeight))
             _expandedHeight = expandedHeight;
+        UpdateMinimizeButtonVisual();
+
+        if (IsLoaded)
+        {
+            if (_isMinimized && !previousMinimized)
+                CollapseToMinimize();
+            else if (!_isMinimized && previousMinimized)
+                ExpandFromMinimize();
+        }
 
         BtnSortDir.Content = _sortDescending ? "↓" : "↑";
         BtnSortDir.ToolTip = _sortDescending ? "Descending" : "Ascending";
@@ -186,8 +193,8 @@ public partial class DesktopFolderWidget : Window
                     ? ws.ActiveFolder
                     : Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
 
-        ws.Custom[FolderKey] = _folderPath;
-        ws.Custom.Remove(ActiveFolderKey);
+        ws.Custom.Remove(LegacyFolderKey);
+        ws.Custom.Remove(LegacyActiveFolderKey);
         ws.ActiveFolder = _folderPath;
         ws.Custom[SortKey] = _sortMode switch
         {
@@ -200,11 +207,16 @@ public partial class DesktopFolderWidget : Window
         ws.Custom.Remove(MinimizedKey);
         ws.IsMinimized = _isMinimized;
         _widgetSettings.IsMinimized = _isMinimized;
+        ws.Custom.Remove(LegacyExpandedHeightKey);
         if (_expandedHeight > 0)
         {
-            ws.Custom[ExpandedHeightKey] = _expandedHeight.ToString(System.Globalization.CultureInfo.InvariantCulture);
             ws.ExpandedHeight = _expandedHeight;
             _widgetSettings.ExpandedHeight = _expandedHeight;
+        }
+        else
+        {
+            ws.ExpandedHeight = null;
+            _widgetSettings.ExpandedHeight = null;
         }
         ws.ActiveFolder = _folderPath;
         _appSettings.Widgets[_widgetId] = ws;
@@ -552,7 +564,14 @@ public partial class DesktopFolderWidget : Window
             CollapseToMinimize();
         }
 
+        UpdateMinimizeButtonVisual();
         PersistFolderState();
+    }
+
+    private void UpdateMinimizeButtonVisual()
+    {
+        BtnMinimize.Content = _isMinimized ? "▢" : "—";
+        BtnMinimize.ToolTip = _isMinimized ? "Restore" : "Minimize";
     }
 
     private void CollapseToMinimize()

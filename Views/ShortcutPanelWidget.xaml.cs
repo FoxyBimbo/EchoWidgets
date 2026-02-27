@@ -18,7 +18,7 @@ public partial class ShortcutPanelWidget : Window
 {
     private const string MinimizedKey = "IsMinimized";
     private const string LegacyCollapsedKey = "IsCollapsed";
-    private const string ExpandedHeightKey = "ExpandedHeight";
+    private const string LegacyExpandedHeightKey = "ExpandedHeight";
     private readonly string _widgetId;
     private readonly WidgetSettings _widgetSettings;
     private readonly AppSettings _appSettings;
@@ -73,6 +73,7 @@ public partial class ShortcutPanelWidget : Window
     private void ApplyWidgetSettingsFromModel()
     {
         var ws = SyncWidgetSettings();
+        var previousMinimized = _isMinimized;
         ThemeHelper.ApplyToElement(this, ws.CustomColors);
         Topmost = ws.Topmost;
         _defaultTopmost = ws.Topmost;
@@ -93,12 +94,21 @@ public partial class ShortcutPanelWidget : Window
         ws.Custom.Remove(LegacyCollapsedKey);
 
         _expandedHeight = ws.ExpandedHeight ?? 0;
-        if (ws.Custom.TryGetValue(ExpandedHeightKey, out var expandedValue)
+        if (ws.Custom.TryGetValue(LegacyExpandedHeightKey, out var expandedValue)
             && double.TryParse(expandedValue, out var expandedHeight))
             _expandedHeight = expandedHeight;
 
         BtnMinimize.Content = _isMinimized ? "▢" : "—";
         BtnMinimize.ToolTip = _isMinimized ? "Restore" : "Minimize";
+
+        if (IsLoaded)
+        {
+            if (_isMinimized && !previousMinimized)
+                CollapseToMinimize();
+            else if (!_isMinimized && previousMinimized)
+                ExpandFromMinimize();
+        }
+
         LoadShortcuts();
     }
 
@@ -488,17 +498,16 @@ public partial class ShortcutPanelWidget : Window
         ws.Custom["Title"] = TxtTitle.Text;
         ws.Custom.Remove(LegacyCollapsedKey);
         ws.Custom.Remove(MinimizedKey);
+        ws.Custom.Remove(LegacyExpandedHeightKey);
         ws.IsMinimized = _isMinimized;
         _widgetSettings.IsMinimized = _isMinimized;
         if (_expandedHeight > 0)
         {
-            ws.Custom[ExpandedHeightKey] = _expandedHeight.ToString(CultureInfo.InvariantCulture);
             ws.ExpandedHeight = _expandedHeight;
             _widgetSettings.ExpandedHeight = _expandedHeight;
         }
         else
         {
-            ws.Custom.Remove(ExpandedHeightKey);
             ws.ExpandedHeight = null;
             _widgetSettings.ExpandedHeight = null;
         }

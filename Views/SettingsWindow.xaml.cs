@@ -282,6 +282,7 @@ public partial class SettingsWindow : Window
         SliderOpacity.Value = ws.Opacity;
         TxtOpacityValue.Text = $"{(int)(ws.Opacity * 100)}%";
         ChkTopmost.IsChecked = ws.Topmost;
+        ChkStartMinimized.IsChecked = ws.IsMinimized;
 
         // Per-widget custom colors
         ChkWidgetCustomColors.IsChecked = ws.CustomColors is not null;
@@ -303,7 +304,9 @@ public partial class SettingsWindow : Window
                 _ => 0
             };
 
-            ws.Custom.TryGetValue("DefaultFolder", out var folder);
+            var folder = ws.ActiveFolder;
+            if (string.IsNullOrEmpty(folder))
+                ws.Custom.TryGetValue("DefaultFolder", out folder);
             TxtDefaultFolder.Text = string.IsNullOrEmpty(folder)
                 ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
                 : folder;
@@ -369,6 +372,7 @@ public partial class SettingsWindow : Window
 
         ws.Opacity = SliderOpacity.Value;
         ws.Topmost = ChkTopmost.IsChecked == true;
+        ws.IsMinimized = ChkStartMinimized.IsChecked == true;
         ws.CustomColors = ReadWidgetColorFields();
 
         if (kind == "Folder")
@@ -383,7 +387,8 @@ public partial class SettingsWindow : Window
 
             var folder = TxtDefaultFolder.Text.Trim();
             if (!string.IsNullOrEmpty(folder))
-                ws.Custom["DefaultFolder"] = folder;
+                ws.ActiveFolder = folder;
+            ws.Custom.Remove("DefaultFolder");
         }
 
         if (_widgetSettingsOverride is not null && _widgetIdOverride is not null)

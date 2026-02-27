@@ -223,6 +223,9 @@
                                       Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,8"
                                       Checked="ChkTopmost_Changed" Unchecked="ChkTopmost_Changed"/>
 
+                            <CheckBox x:Name="ChkStartMinimized" Content="Start minimized"
+                                      Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,8"/>
+
                             <CheckBox x:Name="ChkWidgetCustomColors" Content="Use custom colors for this widget"
                                       Foreground="{DynamicResource ForegroundBrush}" Margin="0,0,0,8"
                                       Checked="ChkWidgetCustomColors_Changed" Unchecked="ChkWidgetCustomColors_Changed"/>
