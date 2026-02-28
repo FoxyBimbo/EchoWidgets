@@ -329,6 +329,7 @@ public partial class ShortcutPanelWidget : Window
 
         MainWindow.DockManager.Dock(WidgetId, this, edge, thickness);
         HighlightActiveEdge(edge);
+        FloatingResizeGrip.Visibility = Visibility.Collapsed;
     }
 
     private void Undock(bool preservePosition = false)
@@ -361,6 +362,7 @@ public partial class ShortcutPanelWidget : Window
             Top = (screen.Height - Height) / 2;
         }
         HighlightActiveEdge(DockEdge.None);
+        FloatingResizeGrip.Visibility = Visibility.Visible;
     }
 
     private void HighlightActiveEdge(DockEdge edge)

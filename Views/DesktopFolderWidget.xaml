@@ -4,7 +4,7 @@
         Title="Folder" Width="320" Height="420"
         WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" Topmost="False"
-        ShowInTaskbar="False" ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False" ResizeMode="CanResize"
         MouseLeftButtonDown="Window_MouseLeftButtonDown"
         MouseEnter="Window_MouseEnter"
         MouseLeave="Window_MouseLeave"

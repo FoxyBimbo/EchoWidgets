@@ -4,7 +4,7 @@
         Title="Shortcut Panel" Width="260" Height="320"
         WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" Topmost="False"
-        ShowInTaskbar="False" ResizeMode="NoResize"
+        ShowInTaskbar="False" ResizeMode="CanResize"
         MouseLeftButtonDown="Window_MouseLeftButtonDown"
         MouseEnter="Window_MouseEnter"
         MouseLeave="Window_MouseLeave"
@@ -95,5 +95,8 @@
                 </StackPanel>
             </Grid>
         </Border>
+
+        <ResizeGrip x:Name="FloatingResizeGrip" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Width="14" Height="14" Margin="0,0,6,6"/>
     </Grid>
 </Window>
